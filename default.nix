@@ -13,6 +13,7 @@ let
   hpkgs = pkgs.haskell.packages.ghc882.override (old: {
     overrides = lib.composeExtensions (old.overrides or (self: super: {})) (self: super: {
       on-demand-minecraft = self.callCabal2nix "on-demand-minecraft" (lib.sourceByRegex ./. [
+        "^app$"
         "^.*\\.hs$"
         "^.*\\.cabal$"
       ]) {};

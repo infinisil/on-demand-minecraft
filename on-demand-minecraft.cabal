@@ -13,7 +13,9 @@ cabal-version:       >=1.10
 extra-source-files:  readme.md
 
 executable on-demand-minecraft
+  hs-source-dirs:      app
   main-is:             Main.hs
+  other-modules:       Socket
   default-language:    Haskell2010
   build-depends:       base >= 4.12 && < 5
                      , network
