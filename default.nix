@@ -24,11 +24,47 @@ let
       })));
     });
   });
-  
+
   env = hpkgs.shellFor {
     packages = p: [ p.on-demand-minecraft ];
     nativeBuildInputs = [ hpkgs.cabal-install ];
   };
-in hpkgs.on-demand-minecraft // {
+
+  pkg = hpkgs.on-demand-minecraft;
+
+in pkg // {
   inherit env hpkgs;
+
+  test =
+    let
+      testingLib = import (pkgs.path + "/nixos/lib/testing-python.nix") {
+        system = builtins.currentSystem;
+      };
+    in
+      testingLib.makeTest {
+        machine = {
+          systemd.sockets.on-demand-minecraft = {
+            wantedBy = [ "sockets.target" ];
+            socketConfig.ListenStream = "25565";
+          };
+
+          systemd.services.on-demand-minecraft = {
+            serviceConfig.ExecStart = "${pkg}/bin/on-demand-minecraft";
+          };
+        };
+        testScript = ''
+          machine.start()
+          machine.wait_for_unit("on-demand-minecraft.socket")
+
+          res = machine.succeed('echo "Hello\nquit" | nc localhost 25565')
+          if res != "Hello\nSee ya\n":
+              raise Exception('Did not get the expected output, but "{}" instead'.format(res))
+
+          res = machine.succeed('echo "Hi there\nquit" | nc localhost 25565')
+          if res != "Hi there\nSee ya\n":
+              raise Exception('Did not get the expected output, but "{}" instead'.format(res))
+        '';
+
+      };
+
 }
