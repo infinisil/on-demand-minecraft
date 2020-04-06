@@ -12,7 +12,7 @@ The rough sketch to implement this is as follows:
 Previous work is in https://github.com/Infinisil/system/tree/2e3e3bfe3dd6904d91e944dba8bb0663e3d6ea0b/config/modules/on-demand-minecraft
 
 Implementation steps:
-- Get a simple Haskell-based socket service working, so that one can ping it with e.g. `nc` and it responds with a pong. https://hackage.haskell.org/package/socket-activation can be used for this
-- Implement part of the minecraft server protocol such that status and login messages can be understood and replied to
-- Implement the server starting part with the digital ocean API: https://hackage.haskell.org/package/DOH
-- To determine whether the actual server is running, send a status message to it
+- [x] Get a simple Haskell-based socket service working, so that one can ping it with e.g. `nc` and it responds with a pong. https://hackage.haskell.org/package/socket-activation can be used for this
+- [ ] Implement part of the minecraft server protocol such that status and login messages can be understood and replied to
+- [ ] Implement the server starting part with the digital ocean API: https://hackage.haskell.org/package/DOH
+- [ ] To determine whether the actual server is running, send a status message to it
