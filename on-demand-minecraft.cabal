@@ -1,0 +1,20 @@
+name:                on-demand-minecraft
+version:             0.1.0.0
+synopsis:            
+-- description:
+homepage:            
+license:             GPL-3.0-or-later
+author:              Silvan Mosberger
+maintainer:          contact@infinisil.com
+copyright:           2020 Silvan Mosberger
+category:            
+build-type:          Simple
+cabal-version:       >=1.10
+extra-source-files:  readme.md
+
+executable on-demand-minecraft
+  main-is:             Main.hs
+  default-language:    Haskell2010
+  build-depends:       base >= 4.12 && < 5
+                     , network
+                     , socket-activation
