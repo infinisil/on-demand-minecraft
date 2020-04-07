@@ -22,8 +22,8 @@ let
 
       socket-activation = hlib.unmarkBroken (hlib.doJailbreak (hlib.appendPatch super.socket-activation (pkgs.fetchpatch {
         # https://github.com/ddfisher/haskell-socket-activation/pull/6
-        url = "https://github.com/ddfisher/haskell-socket-activation/commit/7545480ed6f5e88dacf7041f73f6c1e15a269984.patch";
-        sha256 = "1qw7zv29n1mdgv2asiwb4mwr7h5wpyv6a6mswf9rj1mchxahmgd8";
+        url = "https://github.com/ddfisher/haskell-socket-activation/commit/7e33b1f89e2eb7c4b6fd92fdbd89a65e93c25d3a.patch";
+        sha256 = "1ih2y9gwi7ywa21mm497kgkynabd7y0pvwivfrgd9p84rw01haq3";
       })));
     });
   });
