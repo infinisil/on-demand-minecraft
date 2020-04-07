@@ -1,14 +1,14 @@
 cabal-version:       2.2
 name:                on-demand-minecraft
 version:             0.1.0.0
-synopsis:            
+synopsis:
 -- description:
-homepage:            
+homepage:
 license:             GPL-3.0-or-later
 author:              Silvan Mosberger
 maintainer:          contact@infinisil.com
 copyright:           2020 Silvan Mosberger
-category:            
+category:
 build-type:          Simple
 extra-source-files:  readme.md
 
@@ -19,6 +19,11 @@ executable on-demand-minecraft
   build-depends:       base >= 4.12 && < 5
                      , on-demand-minecraft
                      , network
+                     , store
+                     , bytestring
+                     , stm
+                     , aeson
+                     , text
 
 library
   hs-source-dirs:      lib
@@ -32,6 +37,8 @@ library
                      , store
                      , bytestring
                      , text
+                     , contravariant
+                     , aeson
 
 
 test-suite on-demand-minecraft-tests
