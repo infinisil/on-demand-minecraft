@@ -30,6 +30,8 @@ library
                      , socket-activation
                      , stm
                      , store
+                     , bytestring
+                     , text
 
 
 test-suite on-demand-minecraft-tests
@@ -43,3 +45,4 @@ test-suite on-demand-minecraft-tests
                      , store
                      , bytestring
                      , QuickCheck
+                     , quickcheck-instances

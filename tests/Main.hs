@@ -10,19 +10,19 @@ import Data.Word
 import Data.Int
 import Control.Monad
 import Test.QuickCheck
+import Test.QuickCheck.Instances.Text ()
 
-main :: IO ()
-main = hspec $
-  describe "Minecraft.VarInt" $ do
-    it "correctly handles the wiki examples" $
-      forM_ wikiExamples $ \(value, bytes) ->
-        unpack (encode (VarInt value)) `shouldBe` bytes
+varIntSpec :: Spec
+varIntSpec = describe "Minecraft.VarInt" $ do
+  it "correctly handles the wiki examples" $
+    forM_ wikiExamples $ \(value, bytes) ->
+      unpack (encode (VarInt value)) `shouldBe` bytes
 
-    it "doesn't change the value when encoding and decoding" $
-      property $ \value -> decode (encode (VarInt value)) == Right (VarInt value)
+  it "doesn't change the value when encoding and decoding" $
+    property $ \value -> decode (encode (VarInt value)) == Right (VarInt value)
 
-    it "has a maximum size of 5" $
-      property $ \value -> BS.length (encode (VarInt value)) <= 5
+  it "has a maximum size of 5" $
+    property $ \value -> BS.length (encode (VarInt value)) <= 5
 
   where
     -- These are from https://wiki.vg/Protocol#VarInt_and_VarLong
@@ -37,3 +37,13 @@ main = hspec $
       , (-1, [255, 255, 255, 255, 15])
       , (-2147483648, [128, 128, 128, 128, 8])
       ]
+
+mcStringSpec :: Spec
+mcStringSpec = describe "Minecraft.MCString" $
+  it "doesn't change the value when encoding and decoding" $
+    property $ \text -> decode (encode (MCString text)) == Right (MCString text)
+
+main :: IO ()
+main = hspec $ do
+  varIntSpec
+  mcStringSpec
