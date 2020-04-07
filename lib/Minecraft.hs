@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE BinaryLiterals      #-}
 {-# LANGUAGE DataKinds           #-}
 {-# LANGUAGE DeriveGeneric       #-}
@@ -7,15 +8,15 @@
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE RankNTypes          #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TupleSections       #-}
 
 module Minecraft where
 
 import Data.Store
-import Data.Store.Internal (combineSize, combineSizeWith, getSizeWith)
+import Data.Store.Internal (combineSize, combineSizeWith, getSizeWith, getSize)
 import Data.Int (Int32, Int64)
 import Data.Bits
 import Data.Word (Word8, Word32, Word16)
+import Data.Proxy
 import Data.Maybe (fromJust)
 import qualified Data.ByteString as BS
 
@@ -33,8 +34,10 @@ import Data.Functor.Contravariant.Divisible
 import qualified Data.Aeson as A
 import qualified Data.ByteString.Lazy as LBS
 
+import GHC.TypeLits
 -- See https://wiki.vg/Protocol#VarInt_and_VarLong
 newtype VarInt = VarInt Int32 deriving (Show, Eq)
+
 
 instance Store VarInt where
   size = VarSize (\(VarInt value) -> case value of
@@ -78,84 +81,67 @@ data Handshake = Handshake
   { protocolVersion :: ProtocolVersion
   , serverAddress :: ServerAddress
   , serverPort :: ServerPort
+  -- TODO: Make this be an enum directly
   , nextState :: ConnectionState
   } deriving (Generic, Show, Eq)
 
 instance Store Handshake
-testHandshake = Handshake (VarInt 10) (MCString "hello") 10 (VarInt 10)
 
-newtype HandshakePacket = HandshakePacket { handshakePacketData :: Handshake }
-  deriving (Show, Eq)
 
-type PacketID = VarInt
-handshakePacketId :: HandshakePacket -> PacketID
-handshakePacketId (HandshakePacket _) = VarInt 0
+data ServerState = HandshakingState | StatusState | LoginState
 
-instance Store HandshakePacket where
-  size = combineSize handshakePacketId handshakePacketData
-  poke value = poke (handshakePacketId value) >> poke (handshakePacketData value)
-  peek = do
-    VarInt readPacketId :: PacketID <- peek
-    case readPacketId of
-      0 -> HandshakePacket <$> peek
-      _ -> fail $ "Packet ID " <> show readPacketId <> " not supported"
+data ClientPacket (s :: ServerState) where
+  ClientPacketHandshake :: Handshake -> ClientPacket HandshakingState
+  ClientPacketRequest :: ClientPacket StatusState
+  ClientPacketPing :: Int64 -> ClientPacket StatusState
 
-data ClientStatusPacket = ClientStatusRequest | ClientStatusPing Int64
-
-instance Store ClientStatusPacket where
-  size = choose f (combineSize (const (VarInt 0)) id) (combineSize (const (VarInt 1)) id) where
-    f :: ClientStatusPacket -> Either () Int64
-    f ClientStatusRequest = Left ()
-    f (ClientStatusPing x) = Right x
-  poke ClientStatusRequest = poke (VarInt 0)
-  poke (ClientStatusPing val) = poke (VarInt 1) >> poke val
+instance Store (ClientPacket HandshakingState) where
+  size = VarSize f where
+    f :: ClientPacket HandshakingState -> Int
+    f (ClientPacketHandshake handshake) = getSize (VarInt 0) + getSize handshake
+  poke (ClientPacketHandshake handshake) = poke (VarInt 0) >> poke handshake
   peek = peek >>= \case
-    VarInt 0 -> pure ClientStatusRequest
-    VarInt 1 -> ClientStatusPing <$> peek
+    VarInt 0 -> ClientPacketHandshake <$> peek
 
-
-data ServerStatusPacket = ServerStatusResponse MCString | ServerStatusPong Int64 deriving Show
-
-instance Store ServerStatusPacket where
-  size = choose f (combineSize (const (VarInt 0)) id) (combineSize (const (VarInt 1)) id) where
-    f :: ServerStatusPacket -> Either MCString Int64
-    f (ServerStatusResponse val) = Left val
-    f (ServerStatusPong x) = Right x
-  poke (ServerStatusResponse val) = poke (VarInt 0) >> poke val
-  poke (ServerStatusPong val) = poke (VarInt 1) >> poke val
+instance Store (ClientPacket StatusState) where
+  size = VarSize f where
+    f :: ClientPacket StatusState -> Int
+    f ClientPacketRequest = getSize (VarInt 0)
+    f (ClientPacketPing value) = getSize (VarInt 1) + getSize value
+  poke ClientPacketRequest = poke (VarInt 0)
+  poke (ClientPacketPing value) = poke (VarInt 1) >> poke value
   peek = peek >>= \case
-    VarInt 0 -> ServerStatusResponse <$> peek
-    VarInt 1 -> ServerStatusPong <$> peek
+    VarInt 0 -> pure ClientPacketRequest
+    VarInt 1 -> ClientPacketPing <$> peek
 
-instance Divisible Size where
-  divide f = combineSizeWith (fst . f) (snd . f)
-  conquer = ConstSize 0
+instance Store (ClientPacket LoginState) where
+  size = undefined
+  poke = undefined
+  peek = undefined
 
-instance Decidable Size where
-  choose f s t = VarSize (either (getSizeWith s) (getSizeWith t) . f)
-  lose f = VarSize (absurd . f)
+data ServerPacket (s :: ServerState) where
+  ServerPacketResponse :: Response -> ServerPacket StatusState
+  ServerPacketPong :: Int64 -> ServerPacket StatusState
 
-instance Num (Size a) where
-  VarSize l + VarSize r = VarSize (liftA2 (+) l r)
-  VarSize l + ConstSize r = VarSize ((+ r) <$> l)
-  ConstSize l + VarSize r = VarSize ((+ l) <$> r)
-  ConstSize l + ConstSize r = ConstSize (l + r)
+instance Store (ServerPacket StatusState) where
+  size = VarSize f where
+    f :: ServerPacket StatusState -> Int
+    f (ServerPacketResponse response) = getSize (VarInt 0) + getSize (responseToMCString response)
+    f (ServerPacketPong value) = getSize (VarInt 1) + getSize value
+  poke (ServerPacketResponse response) = poke (VarInt 0) >> poke (responseToMCString response)
+  poke (ServerPacketPong value) = poke (VarInt 1) >> poke value
+  peek = peek >>= \case
+    VarInt 0 -> do
+      Just response <- mcStringToResponse <$> peek
+      return (ServerPacketResponse response)
+    VarInt 1 -> ServerPacketPong <$> peek
 
-  VarSize l * VarSize r = VarSize (liftA2 (*) l r)
-  VarSize l * ConstSize r = VarSize ((* r) <$> l)
-  ConstSize l * VarSize r = VarSize ((* l) <$> r)
-  ConstSize l * ConstSize r = ConstSize (l * r)
 
-  abs (ConstSize v) = ConstSize (abs v)
-  abs (VarSize f) = VarSize (abs <$> f)
+responseToMCString :: Response -> MCString
+responseToMCString = MCString . decodeUtf8 . LBS.toStrict . A.encode
 
-  signum (ConstSize v) = ConstSize (signum v)
-  signum (VarSize f) = VarSize (signum <$> f)
-
-  fromInteger int = ConstSize (fromInteger int)
-
-  negate (ConstSize v) = ConstSize (negate v)
-  negate (VarSize f) = VarSize (negate <$> f)
+mcStringToResponse :: MCString -> Maybe Response
+mcStringToResponse (MCString text) = A.decodeStrict (encodeUtf8 text)
 
 jsonOptions :: A.Options
 jsonOptions = A.defaultOptions
@@ -170,6 +156,9 @@ data ResponseVersion = ResponseVersion
 instance A.ToJSON ResponseVersion where
   toEncoding = A.genericToEncoding jsonOptions
 
+instance A.FromJSON ResponseVersion where
+  parseJSON = A.genericParseJSON jsonOptions
+
 data ResponsePlayers = ResponsePlayers
   { response_players_max :: Int
   , response_players_online :: Int
@@ -179,12 +168,18 @@ data ResponsePlayers = ResponsePlayers
 instance A.ToJSON ResponsePlayers where
   toEncoding = A.genericToEncoding jsonOptions
 
+instance A.FromJSON ResponsePlayers where
+  parseJSON = A.genericParseJSON jsonOptions
+
 newtype ResponseDescription = ResponseDescription
   { response_description_text :: Text
   } deriving (Generic, Show)
 
 instance A.ToJSON ResponseDescription where
   toEncoding = A.genericToEncoding jsonOptions
+
+instance A.FromJSON ResponseDescription where
+  parseJSON = A.genericParseJSON jsonOptions
 
 data Response = Response
   { response_version :: ResponseVersion
@@ -194,3 +189,6 @@ data Response = Response
 
 instance A.ToJSON Response where
   toEncoding = A.genericToEncoding jsonOptions
+
+instance A.FromJSON Response where
+  parseJSON = A.genericParseJSON jsonOptions

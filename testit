@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+
+set -e
+
+servicename=on-demand-minecraft
+
+cabal build exe:on-demand-minecraft
+exe=$(cabal exec which on-demand-minecraft)
+
+trap 'sudo systemctl stop on-demand-minecraft.socket odm' exit
+
+sudo systemd-run --unit=on-demand-minecraft --socket-property=ListenStream=25565 "$exe"
+
+journalctl -u on-demand-minecraft -f

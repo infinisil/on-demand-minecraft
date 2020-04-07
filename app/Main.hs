@@ -1,4 +1,8 @@
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE LambdaCase          #-}
+{-# LANGUAGE DataKinds           #-}
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 module Main where
@@ -18,9 +22,12 @@ import Data.Text.Encoding
 import Control.Concurrent.STM
 import Control.Concurrent.STM.TVar
 import Control.Concurrent (forkIO, threadDelay)
+import Control.Monad
 
 import qualified Data.Aeson as A
 import qualified Data.ByteString.Lazy as LBS
+
+
 
 consumeExactly :: ByteBuffer -> TVar Int -> TVar Bool -> Int -> IO (Maybe ByteString)
 consumeExactly buffer var term count = do
@@ -63,45 +70,64 @@ readPacket buffer var term = do
               getSize bytes
             Right count -> return (Just count)
 
-statusPacket :: ServerStatusPacket
-statusPacket = ServerStatusResponse (MCString encoded) where
+statusPacket :: ServerPacket StatusState
+statusPacket = ServerPacketResponse response where
   response = Response
       { response_version = ResponseVersion "1.15.2" 578
       , response_players = ResponsePlayers 100000000 100000001 []
       , response_description = ResponseDescription "NANI SORE"
       }
-  encoded = decodeUtf8 (LBS.toStrict (A.encode response))
+
+
+encodePacket :: Store (ServerPacket s) => ServerPacket s -> ByteString
+encodePacket packet =
+  let payload = encode packet
+      header = encode (VarInt (fromIntegral (BS.length payload)))
+  in header <> payload
 
 clientHandler :: Socket -> IO ()
 clientHandler socket = with Nothing $ \buffer -> do
   var <- newTVarIO 0
   term <- newTVarIO False
   forkIO $ receiveLoop socket buffer var term
-  let loop state = readPacket buffer var term >>= \case
-        Nothing -> putStrLn "Terminated"
-        Just packet -> case state of
-          (VarInt 0) -> case decode packet of
+  run buffer var term
+  close socket
+  where
+    run :: ByteBuffer -> TVar Int -> TVar Bool -> IO ()
+    run buffer var term = getNext @HandshakingState $ \case
+      ClientPacketHandshake handshake -> do
+        putStrLn $ "Got handshake: " <> show handshake
+        case nextState handshake of
+          VarInt 1 -> do
+            putStrLn "Next state is status"
+            clientLoopStatus
+          VarInt 2 -> do
+            putStrLn "Next state is login"
+            clientLoopLogin
+      where
+        getNext :: forall s . Store (ClientPacket s) => (ClientPacket s -> IO ()) -> IO ()
+        getNext handler = readPacket buffer var term >>= \case
+          Nothing -> putStrLn "Exiting without getting any messages"
+          Just bytes -> case decode bytes :: Either PeekException (ClientPacket s) of
             Left exc -> print exc
-            Right (HandshakePacket handshake) -> do
-              putStrLn $ "Received handshake: " <> show handshake
-              loop (nextState handshake)
-          (VarInt 1) -> case decode packet of
-            Left exc -> print exc
-            Right ClientStatusRequest -> do
-              putStrLn "Received request!"
-              let bytes = encode statusPacket
-                  allBytes = encode (VarInt (fromIntegral (BS.length bytes))) <> bytes
-              sendAll socket allBytes
-              loop state
-            Right (ClientStatusPing val) -> do
-              putStrLn $ "Received ping: " <> show val
-              let bytes = encode (ServerStatusPong val)
-                  allBytes = encode (VarInt (fromIntegral (BS.length bytes))) <> bytes
-              sendAll socket allBytes
-              loop state
-          _ -> putStrLn $ "State " <> show state <> " not supported yet"
-  loop (VarInt 0)
-  gracefulClose socket 5000
+            Right value -> handler value
+
+
+        clientLoopStatus :: IO ()
+        clientLoopStatus = getNext @StatusState $ \case
+          ClientPacketRequest -> do
+            putStrLn "Got request!"
+            sendAll socket (encodePacket statusPacket)
+            clientLoopStatus
+          ClientPacketPing nonce -> do
+            putStrLn "Got a ping!"
+            sendAll socket (encodePacket (ServerPacketPong nonce))
+            clientLoopStatus
+
+        clientLoopLogin :: IO ()
+        clientLoopLogin = getNext @LoginState $ \case
+          _ -> undefined
+
 
 receiveLoop :: Socket -> ByteBuffer -> TVar Int -> TVar Bool -> IO ()
 receiveLoop socket buffer var term = do
