@@ -1,18 +1,8 @@
 module Main where
 
 import Socket
-
 import Network.Socket
-import Network.Socket.Activation (getActivatedSockets)
-
-import Control.Concurrent (forkIO, killThread)
 import System.IO
-
-import Data.Functor (void)
-import Control.Monad (forever)
-
-import Control.Concurrent.STM
-import Control.Concurrent.STM.TVar
 
 clientHandler :: Socket -> IO ()
 clientHandler socket = do
