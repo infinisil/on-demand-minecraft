@@ -1,3 +1,5 @@
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE BinaryLiterals      #-}
 {-# LANGUAGE DataKinds           #-}
@@ -72,23 +74,26 @@ instance Store MCString where
     bytes :: [Word8] <- replicateM (fromIntegral len) peek
     pure $ MCString (decodeUtf8 (BS.pack bytes))
 
-type ProtocolVersion = VarInt
-type ServerAddress = MCString
-type ServerPort = Word16
-type ConnectionState = VarInt
-
 data Handshake = Handshake
-  { protocolVersion :: ProtocolVersion
-  , serverAddress :: ServerAddress
-  , serverPort :: ServerPort
-  -- TODO: Make this be an enum directly
-  , nextState :: ConnectionState
+  { protocolVersion :: Int32
+  , serverAddress :: Text
+  , serverPort :: Word16
+  , nextState :: ServerState
   } deriving (Generic, Show, Eq)
 
-instance Store Handshake
+instance Store Handshake where
+  size = VarSize f where
+    f Handshake { .. } = getSize (VarInt protocolVersion) + getSize (MCString serverAddress) + getSize serverPort + getSize (VarInt (fromIntegral (fromEnum nextState)))
+  poke Handshake { .. } = poke (VarInt protocolVersion) >> poke (MCString serverAddress) >> poke serverPort >> poke (VarInt (fromIntegral (fromEnum nextState)))
+  peek = do
+    VarInt protocolVersion <- peek
+    MCString serverAddress <- peek
+    serverPort <- peek
+    VarInt nextStateInt <- peek
+    let nextState = toEnum (fromIntegral nextStateInt)
+    return Handshake { .. }
 
-
-data ServerState = HandshakingState | StatusState | LoginState
+data ServerState = HandshakingState | StatusState | LoginState deriving (Show, Eq, Enum)
 
 data ClientPacket (s :: ServerState) where
   ClientPacketHandshake :: Handshake -> ClientPacket HandshakingState
@@ -136,6 +141,11 @@ instance Store (ServerPacket StatusState) where
       return (ServerPacketResponse response)
     VarInt 1 -> ServerPacketPong <$> peek
 
+encodePacket :: Store (ServerPacket s) => ServerPacket s -> BS.ByteString
+encodePacket packet =
+  let payload = encode packet
+      header = encode (VarInt (fromIntegral (BS.length payload)))
+  in header <> payload
 
 responseToMCString :: Response -> MCString
 responseToMCString = MCString . decodeUtf8 . LBS.toStrict . A.encode
