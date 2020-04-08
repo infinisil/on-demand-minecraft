@@ -1,3 +1,4 @@
+{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -100,6 +101,8 @@ data ClientPacket (s :: ServerState) where
   ClientPacketRequest :: ClientPacket StatusState
   ClientPacketPing :: Int64 -> ClientPacket StatusState
 
+deriving instance Show (ClientPacket s)
+
 instance Store (ClientPacket HandshakingState) where
   size = VarSize f where
     f :: ClientPacket HandshakingState -> Int
@@ -128,6 +131,8 @@ data ServerPacket (s :: ServerState) where
   ServerPacketResponse :: Response -> ServerPacket StatusState
   ServerPacketPong :: Int64 -> ServerPacket StatusState
 
+deriving instance Show (ServerPacket s)
+
 instance Store (ServerPacket StatusState) where
   size = VarSize f where
     f :: ServerPacket StatusState -> Int
@@ -141,11 +146,6 @@ instance Store (ServerPacket StatusState) where
       return (ServerPacketResponse response)
     VarInt 1 -> ServerPacketPong <$> peek
 
-encodePacket :: Store (ServerPacket s) => ServerPacket s -> BS.ByteString
-encodePacket packet =
-  let payload = encode packet
-      header = encode (VarInt (fromIntegral (BS.length payload)))
-  in header <> payload
 
 responseToMCString :: Response -> MCString
 responseToMCString = MCString . decodeUtf8 . LBS.toStrict . A.encode

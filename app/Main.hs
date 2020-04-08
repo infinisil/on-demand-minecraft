@@ -59,12 +59,14 @@ consumeExactly BufferEnv { .. } count = do
   else return Nothing
 
 
-handleNextPacket :: forall s . Store (ClientPacket s) => BufferEnv -> (ClientPacket s -> IO ()) -> IO ()
-handleNextPacket bufferEnv handler = nextBytes >>= \case
-  Nothing -> putStrLn "Exiting without getting any messages"
+receivePacket :: forall s . (Show (ClientPacket s), Store (ClientPacket s)) => BufferEnv -> (ClientPacket s -> IO ()) -> IO ()
+receivePacket bufferEnv handler = nextBytes >>= \case
+  Nothing -> putStrLn "Client closed connection"
   Just bytes -> case decode bytes :: Either PeekException (ClientPacket s) of
     Left exc -> print exc
-    Right value -> handler value
+    Right packet -> do
+      putStrLn $ "Received packet: " <> show packet
+      handler packet
 
   where
 
@@ -89,6 +91,13 @@ statusPacket = ServerPacketResponse $ Response
   , response_description = ResponseDescription "Server isn't running"
   }
 
+sendPacket :: (Show (ServerPacket s), Store (ServerPacket s)) => Socket -> ServerPacket s -> IO ()
+sendPacket socket packet = do
+  putStrLn $ "Sending packet: " <> show packet
+  let payload = encode packet
+      header = encode (VarInt (fromIntegral (BS.length payload)))
+  sendAll socket (header <> payload)
+
 server :: Socket -> IO ()
 server socket = with Nothing $ \buf -> do
   bufferEnv <- BufferEnv buf <$> newTVarIO 0 <*> newTVarIO False
@@ -97,30 +106,22 @@ server socket = with Nothing $ \buf -> do
   close socket
   where
     run :: BufferEnv -> IO ()
-    run bufferEnv = handleNextPacket @HandshakingState bufferEnv $ \case
-      ClientPacketHandshake handshake -> do
-        putStrLn $ "Got handshake: " <> show handshake
-        case nextState handshake of
-          StatusState -> do
-            putStrLn "Next state is status"
-            clientLoopStatus
-          LoginState -> do
-            putStrLn "Next state is login"
-            clientLoopLogin
+    run bufferEnv = receivePacket @HandshakingState bufferEnv $ \case
+      ClientPacketHandshake handshake -> case nextState handshake of
+        StatusState -> clientLoopStatus
+        LoginState -> clientLoopLogin
       where
         clientLoopStatus :: IO ()
-        clientLoopStatus = handleNextPacket @StatusState bufferEnv $ \case
+        clientLoopStatus = receivePacket @StatusState bufferEnv $ \case
           ClientPacketRequest -> do
-            putStrLn "Got request!"
-            sendAll socket (encodePacket statusPacket)
+            sendPacket socket statusPacket
             clientLoopStatus
           ClientPacketPing nonce -> do
-            putStrLn "Got a ping!"
-            sendAll socket (encodePacket (ServerPacketPong nonce))
+            sendPacket socket $ ServerPacketPong nonce
             clientLoopStatus
 
         clientLoopLogin :: IO ()
-        clientLoopLogin = handleNextPacket @LoginState bufferEnv $ \case
+        clientLoopLogin = receivePacket @LoginState bufferEnv $ \case
           _ -> undefined
 
 

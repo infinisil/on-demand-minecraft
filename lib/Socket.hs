@@ -40,6 +40,8 @@ socketRunner handler = getActivatedSockets >>= \case
     atomically $ do
       count <- readTVar activeConnections
       check (count == 0)
+
+    putStrLn "All connections finished"
     killThread threadId
   Just sockets -> putStrLn $ "Service was started with " <> show (length sockets) <> " sockets, but it should be 1"
   -- TODO: Make this be an alternative way to start the actual server
