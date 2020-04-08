@@ -7,8 +7,13 @@ servicename=on-demand-minecraft
 cabal build exe:on-demand-minecraft
 exe=$(cabal exec which on-demand-minecraft)
 
-trap 'sudo systemctl stop on-demand-minecraft.socket on-demand-minecraft.service' exit
+stopservices() {
+	sudo systemctl reset-failed on-demand-minecraft.socket on-demand-minecraft.service
+	sudo systemctl stop on-demand-minecraft.socket on-demand-minecraft.service
+}
 
-sudo systemd-run --unit=on-demand-minecraft --socket-property=ListenStream=25565 "$exe"
+trap stopservices exit
+
+sudo systemd-run --unit=on-demand-minecraft --socket-property=ListenStream=25565 -p StartLimitIntervalSec=0 "$exe"
 
 journalctl -u on-demand-minecraft -f
