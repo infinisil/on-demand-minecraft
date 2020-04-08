@@ -94,12 +94,13 @@ instance Store Handshake where
     let nextState = toEnum (fromIntegral nextStateInt)
     return Handshake { .. }
 
-data ServerState = HandshakingState | StatusState | LoginState deriving (Show, Eq, Enum)
+data ServerState = HandshakingState | StatusState | LoginState | PlayState deriving (Show, Eq, Enum)
 
 data ClientPacket (s :: ServerState) where
   ClientPacketHandshake :: Handshake -> ClientPacket HandshakingState
   ClientPacketRequest :: ClientPacket StatusState
   ClientPacketPing :: Int64 -> ClientPacket StatusState
+  ClientPacketLoginStart :: Text -> ClientPacket LoginState
 
 deriving instance Show (ClientPacket s)
 
@@ -123,35 +124,66 @@ instance Store (ClientPacket StatusState) where
     VarInt 1 -> ClientPacketPing <$> peek
 
 instance Store (ClientPacket LoginState) where
-  size = undefined
-  poke = undefined
-  peek = undefined
+  size = VarSize f where
+    f :: ClientPacket LoginState -> Int
+    f (ClientPacketLoginStart name) = getSize (VarInt 0) + getSize (MCString name)
+  poke (ClientPacketLoginStart name) = poke (VarInt 0) >> poke (MCString name)
+  peek = peek >>= \case
+    VarInt 0 -> do
+      MCString name <- peek
+      pure $ ClientPacketLoginStart name
 
 data ServerPacket (s :: ServerState) where
   ServerPacketResponse :: Response -> ServerPacket StatusState
   ServerPacketPong :: Int64 -> ServerPacket StatusState
+  ServerPacketLoginSuccess :: Text -> Text -> ServerPacket LoginState
+  ServerPacketDisconnect :: Text -> ServerPacket PlayState
 
 deriving instance Show (ServerPacket s)
 
 instance Store (ServerPacket StatusState) where
   size = VarSize f where
     f :: ServerPacket StatusState -> Int
-    f (ServerPacketResponse response) = getSize (VarInt 0) + getSize (responseToMCString response)
+    f (ServerPacketResponse response) = getSize (VarInt 0) + getSize (jsonToMCString response)
     f (ServerPacketPong value) = getSize (VarInt 1) + getSize value
-  poke (ServerPacketResponse response) = poke (VarInt 0) >> poke (responseToMCString response)
+  poke (ServerPacketResponse response) = poke (VarInt 0) >> poke (jsonToMCString response)
   poke (ServerPacketPong value) = poke (VarInt 1) >> poke value
   peek = peek >>= \case
     VarInt 0 -> do
-      Just response <- mcStringToResponse <$> peek
+      Just response <- mcStringToJson <$> peek
       return (ServerPacketResponse response)
     VarInt 1 -> ServerPacketPong <$> peek
 
+instance Store (ServerPacket LoginState) where
+  size = VarSize f where
+    f :: ServerPacket LoginState -> Int
+    f (ServerPacketLoginSuccess name uuid) = getSize (VarInt 2) + getSize (MCString uuid) + getSize (MCString name)
+  poke (ServerPacketLoginSuccess name uuid) = poke (VarInt 2) >> poke (MCString uuid) >> poke (MCString name)
+  peek = peek >>= \case
+    VarInt 2 -> do
+      MCString uuid <- peek
+      MCString name <- peek
+      pure $ ServerPacketLoginSuccess name uuid
 
-responseToMCString :: Response -> MCString
-responseToMCString = MCString . decodeUtf8 . LBS.toStrict . A.encode
+instance Store (ServerPacket PlayState) where
+  size = VarSize f where
+    f :: ServerPacket PlayState -> Int
+    f (ServerPacketDisconnect reason) = getSize (VarInt 0x1B) + getSize (jsonToMCString chat) where
+      chat = Chat { chat_text = reason }
 
-mcStringToResponse :: MCString -> Maybe Response
-mcStringToResponse (MCString text) = A.decodeStrict (encodeUtf8 text)
+  poke (ServerPacketDisconnect reason) = poke (VarInt 0x1B) >> poke (jsonToMCString chat) where
+    chat = Chat { chat_text = reason }
+  peek = peek >>= \case
+    VarInt 0x1B -> do
+      Just Chat { chat_text = reason } <- mcStringToJson <$> peek
+      pure $ ServerPacketDisconnect reason
+
+
+jsonToMCString :: A.ToJSON a => a -> MCString
+jsonToMCString = MCString . decodeUtf8 . LBS.toStrict . A.encode
+
+mcStringToJson :: A.FromJSON a => MCString -> Maybe a
+mcStringToJson (MCString text) = A.decodeStrict (encodeUtf8 text)
 
 jsonOptions :: A.Options
 jsonOptions = A.defaultOptions
@@ -181,20 +213,20 @@ instance A.ToJSON ResponsePlayers where
 instance A.FromJSON ResponsePlayers where
   parseJSON = A.genericParseJSON jsonOptions
 
-newtype ResponseDescription = ResponseDescription
-  { response_description_text :: Text
+newtype Chat = Chat
+  { chat_text :: Text
   } deriving (Generic, Show)
 
-instance A.ToJSON ResponseDescription where
+instance A.ToJSON Chat where
   toEncoding = A.genericToEncoding jsonOptions
 
-instance A.FromJSON ResponseDescription where
+instance A.FromJSON Chat where
   parseJSON = A.genericParseJSON jsonOptions
 
 data Response = Response
   { response_version :: ResponseVersion
   , response_players :: ResponsePlayers
-  , response_description :: ResponseDescription
+  , response_description :: Chat
   } deriving (Generic, Show)
 
 instance A.ToJSON Response where

@@ -88,7 +88,7 @@ statusPacket :: ServerPacket StatusState
 statusPacket = ServerPacketResponse $ Response
   { response_version = ResponseVersion "1.15.2" 578
   , response_players = ResponsePlayers 20 0 []
-  , response_description = ResponseDescription "Server isn't running"
+  , response_description = Chat "Server isn't running"
   }
 
 sendPacket :: (Show (ServerPacket s), Store (ServerPacket s)) => Socket -> ServerPacket s -> IO ()
@@ -122,7 +122,9 @@ server socket = with Nothing $ \buf -> do
 
         clientLoopLogin :: IO ()
         clientLoopLogin = receivePacket @LoginState bufferEnv $ \case
-          _ -> undefined
+          ClientPacketLoginStart name -> do
+            sendPacket socket $ ServerPacketLoginSuccess name "01e2780a-1334-4891-95dd-506e58dcebb9"
+            sendPacket socket $ ServerPacketDisconnect "starting"
 
 
 receiveLoop :: Socket -> BufferEnv -> IO ()
