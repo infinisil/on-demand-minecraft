@@ -22,15 +22,12 @@ executable on-demand-minecraft
                      , store
                      , bytestring
                      , stm
-                     , aeson
-                     , text
 
 library
   hs-source-dirs:      lib
   exposed-modules:     Minecraft
   default-language:    Haskell2010
   build-depends:       base >= 4.12 && < 5
-                     , stm
                      , store
                      , bytestring
                      , text

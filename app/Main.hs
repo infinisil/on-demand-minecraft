@@ -8,24 +8,19 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module Main where
 
+import Minecraft
+
 import Network.Socket
 import Network.Socket.ByteString
 import System.IO
-
 import System.IO.ByteBuffer
-import Minecraft
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import Data.Store
-import Data.Text.Encoding
 
 import Control.Concurrent.STM
-import Control.Concurrent.STM.TVar
-import Control.Concurrent (forkIO, threadDelay)
+import Control.Concurrent (forkIO)
 import Control.Monad
-
-import qualified Data.Aeson as A
-import qualified Data.ByteString.Lazy as LBS
 
 data BufferEnv = BufferEnv
   { byteBuffer :: ByteBuffer
@@ -72,9 +67,9 @@ receivePacket bufferEnv handler = nextBytes >>= \case
   nextBytes :: IO (Maybe ByteString)
   nextBytes = getSize mempty >>= \case
     Nothing -> return Nothing
-    Just (VarInt size) -> consumeExactly bufferEnv (fromIntegral size)
+    Just (MCVarInt size) -> consumeExactly bufferEnv (fromIntegral size)
     where
-      getSize :: ByteString -> IO (Maybe VarInt)
+      getSize :: ByteString -> IO (Maybe MCVarInt)
       getSize previous = consumeExactly bufferEnv 1 >>= \case
         Nothing -> return Nothing
         Just onebyte ->
@@ -94,7 +89,7 @@ sendPacket :: (Show (ServerPacket s), Store (ServerPacket s)) => Socket -> Serve
 sendPacket socket packet = do
   putStrLn $ "Sending packet: " <> show packet
   let payload = encode packet
-      header = encode (VarInt (fromIntegral (BS.length payload)))
+      header = encode (MCVarInt (fromIntegral (BS.length payload)))
   sendAll socket (header <> payload)
 
 server :: Socket -> IO ()

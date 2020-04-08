@@ -1,5 +1,4 @@
 {-# LANGUAGE StandaloneDeriving #-}
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE BinaryLiterals      #-}
@@ -8,21 +7,17 @@
 {-# LANGUAGE GADTs               #-}
 {-# LANGUAGE KindSignatures      #-}
 {-# LANGUAGE LambdaCase          #-}
-{-# LANGUAGE OverloadedStrings   #-}
-{-# LANGUAGE RankNTypes          #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module Minecraft where
 
 import Data.Store
-import Data.Store.Internal (combineSize, combineSizeWith, getSizeWith, getSize)
+import Data.Store.Internal (getSize)
 import Data.Int (Int32, Int64)
+import Data.Word (Word8, Word16, Word32)
 import Data.Bits
-import Data.Word (Word8, Word32, Word16)
-import Data.Proxy
-import Data.Maybe (fromJust)
 import qualified Data.ByteString as BS
-
+import qualified Data.ByteString.Lazy as LBS
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics
@@ -30,47 +25,38 @@ import Data.List (groupBy)
 import Data.Text.Encoding
 import Data.Foldable (traverse_)
 import Control.Monad (replicateM)
-
-import Control.Applicative
-import Data.Void (absurd)
 import qualified Data.Aeson as A
-import qualified Data.ByteString.Lazy as LBS
 
-import GHC.TypeLits
 -- See https://wiki.vg/Protocol#VarInt_and_VarLong
-newtype VarInt = VarInt Int32 deriving (Show, Eq)
+newtype MCVarInt = MCVarInt Int32 deriving (Show, Eq)
 
-
-instance Store VarInt where
-  size = VarSize (\(VarInt value) -> case value of
+instance Store MCVarInt where
+  size = VarSize (\(MCVarInt value) -> case value of
                      0 -> 1
                      _ -> (32 - countLeadingZeros value + 6) `div` 7)
-  poke (VarInt value) = loop value where
+  poke (MCVarInt value) = loop value where
     loop :: Int32 -> Poke ()
     loop value = if left == 0 then poke right else poke (setBit right 7) >> loop left where
       right :: Word8 = fromIntegral value .&. 0b01111111
       left :: Int32 = fromIntegral (fromIntegral value `shiftR` 7 :: Word32)
-  peek = VarInt <$> loop where
+  peek = MCVarInt <$> loop where
     loop :: Peek Int32
     loop = do
       r :: Word8 <- peek
       rest <- if testBit r 7 then loop else pure 0
       pure $ rest `shiftL` 7 .|. fromIntegral (clearBit r 7)
 
-
+-- See https://wiki.vg/Protocol#Data_types
 newtype MCString = MCString Text deriving (Show, Eq)
 
 instance Store MCString where
   size = VarSize f where
-    f (MCString text) = lengthSize + BS.length encoded where
+    f (MCString text) = getSize (MCVarInt (fromIntegral (BS.length encoded))) + BS.length encoded where
       encoded = encodeUtf8 text
-      VarSize lengthSizeFun = size :: Size VarInt
-      lengthSize = lengthSizeFun $ VarInt (fromIntegral (BS.length encoded))
-
-  poke (MCString text) = poke (VarInt (fromIntegral (BS.length encoded))) >> traverse_ poke (BS.unpack encoded) where
+  poke (MCString text) = poke (MCVarInt (fromIntegral (BS.length encoded))) >> traverse_ poke (BS.unpack encoded) where
     encoded = encodeUtf8 text
   peek = do
-    VarInt len <- peek :: Peek VarInt
+    MCVarInt len <- peek :: Peek MCVarInt
     bytes :: [Word8] <- replicateM (fromIntegral len) peek
     pure $ MCString (decodeUtf8 (BS.pack bytes))
 
@@ -83,13 +69,13 @@ data Handshake = Handshake
 
 instance Store Handshake where
   size = VarSize f where
-    f Handshake { .. } = getSize (VarInt protocolVersion) + getSize (MCString serverAddress) + getSize serverPort + getSize (VarInt (fromIntegral (fromEnum nextState)))
-  poke Handshake { .. } = poke (VarInt protocolVersion) >> poke (MCString serverAddress) >> poke serverPort >> poke (VarInt (fromIntegral (fromEnum nextState)))
+    f Handshake { .. } = getSize (MCVarInt protocolVersion) + getSize (MCString serverAddress) + getSize serverPort + getSize (MCVarInt (fromIntegral (fromEnum nextState)))
+  poke Handshake { .. } = poke (MCVarInt protocolVersion) >> poke (MCString serverAddress) >> poke serverPort >> poke (MCVarInt (fromIntegral (fromEnum nextState)))
   peek = do
-    VarInt protocolVersion <- peek
+    MCVarInt protocolVersion <- peek
     MCString serverAddress <- peek
     serverPort <- peek
-    VarInt nextStateInt <- peek
+    MCVarInt nextStateInt <- peek
     let nextState = toEnum (fromIntegral nextStateInt)
     return Handshake { .. }
 
@@ -106,29 +92,29 @@ deriving instance Show (ClientPacket s)
 instance Store (ClientPacket HandshakingState) where
   size = VarSize f where
     f :: ClientPacket HandshakingState -> Int
-    f (ClientPacketHandshake handshake) = getSize (VarInt 0) + getSize handshake
-  poke (ClientPacketHandshake handshake) = poke (VarInt 0) >> poke handshake
+    f (ClientPacketHandshake handshake) = getSize (MCVarInt 0) + getSize handshake
+  poke (ClientPacketHandshake handshake) = poke (MCVarInt 0) >> poke handshake
   peek = peek >>= \case
-    VarInt 0 -> ClientPacketHandshake <$> peek
+    MCVarInt 0 -> ClientPacketHandshake <$> peek
 
 instance Store (ClientPacket StatusState) where
   size = VarSize f where
     f :: ClientPacket StatusState -> Int
-    f ClientPacketRequest = getSize (VarInt 0)
-    f (ClientPacketPing value) = getSize (VarInt 1) + getSize value
-  poke ClientPacketRequest = poke (VarInt 0)
-  poke (ClientPacketPing value) = poke (VarInt 1) >> poke value
+    f ClientPacketRequest = getSize (MCVarInt 0)
+    f (ClientPacketPing value) = getSize (MCVarInt 1) + getSize value
+  poke ClientPacketRequest = poke (MCVarInt 0)
+  poke (ClientPacketPing value) = poke (MCVarInt 1) >> poke value
   peek = peek >>= \case
-    VarInt 0 -> pure ClientPacketRequest
-    VarInt 1 -> ClientPacketPing <$> peek
+    MCVarInt 0 -> pure ClientPacketRequest
+    MCVarInt 1 -> ClientPacketPing <$> peek
 
 instance Store (ClientPacket LoginState) where
   size = VarSize f where
     f :: ClientPacket LoginState -> Int
-    f (ClientPacketLoginStart name) = getSize (VarInt 0) + getSize (MCString name)
-  poke (ClientPacketLoginStart name) = poke (VarInt 0) >> poke (MCString name)
+    f (ClientPacketLoginStart name) = getSize (MCVarInt 0) + getSize (MCString name)
+  poke (ClientPacketLoginStart name) = poke (MCVarInt 0) >> poke (MCString name)
   peek = peek >>= \case
-    VarInt 0 -> do
+    MCVarInt 0 -> do
       MCString name <- peek
       pure $ ClientPacketLoginStart name
 
@@ -143,23 +129,23 @@ deriving instance Show (ServerPacket s)
 instance Store (ServerPacket StatusState) where
   size = VarSize f where
     f :: ServerPacket StatusState -> Int
-    f (ServerPacketResponse response) = getSize (VarInt 0) + getSize (jsonToMCString response)
-    f (ServerPacketPong value) = getSize (VarInt 1) + getSize value
-  poke (ServerPacketResponse response) = poke (VarInt 0) >> poke (jsonToMCString response)
-  poke (ServerPacketPong value) = poke (VarInt 1) >> poke value
+    f (ServerPacketResponse response) = getSize (MCVarInt 0) + getSize (jsonToMCString response)
+    f (ServerPacketPong value) = getSize (MCVarInt 1) + getSize value
+  poke (ServerPacketResponse response) = poke (MCVarInt 0) >> poke (jsonToMCString response)
+  poke (ServerPacketPong value) = poke (MCVarInt 1) >> poke value
   peek = peek >>= \case
-    VarInt 0 -> do
+    MCVarInt 0 -> do
       Just response <- mcStringToJson <$> peek
       return (ServerPacketResponse response)
-    VarInt 1 -> ServerPacketPong <$> peek
+    MCVarInt 1 -> ServerPacketPong <$> peek
 
 instance Store (ServerPacket LoginState) where
   size = VarSize f where
     f :: ServerPacket LoginState -> Int
-    f (ServerPacketLoginSuccess name uuid) = getSize (VarInt 2) + getSize (MCString uuid) + getSize (MCString name)
-  poke (ServerPacketLoginSuccess name uuid) = poke (VarInt 2) >> poke (MCString uuid) >> poke (MCString name)
+    f (ServerPacketLoginSuccess name uuid) = getSize (MCVarInt 2) + getSize (MCString uuid) + getSize (MCString name)
+  poke (ServerPacketLoginSuccess name uuid) = poke (MCVarInt 2) >> poke (MCString uuid) >> poke (MCString name)
   peek = peek >>= \case
-    VarInt 2 -> do
+    MCVarInt 2 -> do
       MCString uuid <- peek
       MCString name <- peek
       pure $ ServerPacketLoginSuccess name uuid
@@ -167,13 +153,13 @@ instance Store (ServerPacket LoginState) where
 instance Store (ServerPacket PlayState) where
   size = VarSize f where
     f :: ServerPacket PlayState -> Int
-    f (ServerPacketDisconnect reason) = getSize (VarInt 0x1B) + getSize (jsonToMCString chat) where
+    f (ServerPacketDisconnect reason) = getSize (MCVarInt 0x1B) + getSize (jsonToMCString chat) where
       chat = Chat { chat_text = reason }
 
-  poke (ServerPacketDisconnect reason) = poke (VarInt 0x1B) >> poke (jsonToMCString chat) where
+  poke (ServerPacketDisconnect reason) = poke (MCVarInt 0x1B) >> poke (jsonToMCString chat) where
     chat = Chat { chat_text = reason }
   peek = peek >>= \case
-    VarInt 0x1B -> do
+    MCVarInt 0x1B -> do
       Just Chat { chat_text = reason } <- mcStringToJson <$> peek
       pure $ ServerPacketDisconnect reason
 

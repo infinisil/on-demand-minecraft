@@ -13,16 +13,16 @@ import Test.QuickCheck
 import Test.QuickCheck.Instances.Text ()
 
 varIntSpec :: Spec
-varIntSpec = describe "Minecraft.VarInt" $ do
+varIntSpec = describe "Minecraft.MCVarInt" $ do
   it "correctly handles the wiki examples" $
     forM_ wikiExamples $ \(value, bytes) ->
-      unpack (encode (VarInt value)) `shouldBe` bytes
+      unpack (encode (MCVarInt value)) `shouldBe` bytes
 
   it "doesn't change the value when encoding and decoding" $
-    property $ \value -> decode (encode (VarInt value)) == Right (VarInt value)
+    property $ \value -> decode (encode (MCVarInt value)) == Right (MCVarInt value)
 
   it "has a maximum size of 5" $
-    property $ \value -> BS.length (encode (VarInt value)) <= 5
+    property $ \value -> BS.length (encode (MCVarInt value)) <= 5
 
   where
     -- These are from https://wiki.vg/Protocol#VarInt_and_VarLong
