@@ -16,5 +16,5 @@ Implementation steps:
 - [x] Implement part of the minecraft server protocol such that status and login messages can be understood and replied to
   - [x] Status messages
 	- [x] Login messages
+- [ ] Implement dynamically deciding what to do based on whether the actual server is online
 - [ ] Implement the server starting part with the digital ocean API: https://hackage.haskell.org/package/DOH
-- [ ] To determine whether the actual server is running, send a status message to it
