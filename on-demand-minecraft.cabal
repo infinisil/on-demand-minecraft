@@ -19,19 +19,20 @@ executable on-demand-minecraft
   build-depends:       base >= 4.12 && < 5
                      , on-demand-minecraft
                      , network
-                     , store
-                     , bytestring
-                     , stm
 
 library
   hs-source-dirs:      lib
   exposed-modules:     Minecraft
+                       Minecraft.Types
+                       Minecraft.Packet
   default-language:    Haskell2010
   build-depends:       base >= 4.12 && < 5
                      , store
                      , bytestring
                      , text
                      , aeson
+                     , stm
+                     , network
 
 
 test-suite on-demand-minecraft-tests
