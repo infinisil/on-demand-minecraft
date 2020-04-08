@@ -23,11 +23,14 @@ import Control.Concurrent (forkIO)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import Data.Store
+import qualified Polysemy.Internal
+import qualified Polysemy.Internal.CustomErrors
 
 import Polysemy
 import Polysemy.Resource
 import Polysemy.Async
 import Polysemy.Trace
+import Polysemy.Error
 
 data SocketAction (m :: * -> *) a where
   SocketSend :: ByteString -> SocketAction m ()
@@ -43,15 +46,16 @@ data ByteBufferAction (m :: * -> *) a where
 makeSem ''SocketAction
 makeSem ''ByteBufferAction
 
-runSocketAction :: Member (Final IO) r => Socket -> Sem (SocketAction ': r) a -> Sem r a
-runSocketAction socket = interpret $ \case
-  SocketSend bytes -> embedFinal $ sendAll socket bytes
-  SocketRecv count -> do
+runSocketAction :: forall r a . Members '[Async, Final IO, ByteBufferAction] r => Socket -> Sem (SocketAction ': r) a -> Sem r a
+runSocketAction socket action = interpret interpreter (async receiveLoop >> action) where
+  interpreter :: forall m x . SocketAction m x -> Sem r x
+  interpreter (SocketSend bytes) = embedFinal $ sendAll socket bytes
+  interpreter (SocketRecv count) = do
     bytes <- embedFinal $ recv socket count
     return $ if BS.null bytes
       then Nothing
       else Just bytes
-  SocketClose -> embedFinal $ close socket
+  interpreter SocketClose = embedFinal $ close socket
 
 runByteBufferAction :: Member (Final IO) r => Sem (ByteBufferAction ': r) a -> Sem r a
 runByteBufferAction action = resourceToIOFinal
@@ -90,41 +94,113 @@ runByteBufferAction action = resourceToIOFinal
             else return Nothing
         $ action
 
-type PacketSender h r = forall (s :: ServerState) p . (p ~ h s, Show p, Store p) => p -> Sem r ()
-type PacketReceiver h r = forall (s :: ServerState) p a . (p ~ h s, Show p, Store p) => (p -> Sem r a) -> Sem r (Maybe a)
+data Side = Server | Client
 
-serverProtocolRunner
-  :: forall a r
-   . Members '[Trace, ByteBufferAction, Async, SocketAction] r
-  => ( PacketSender ServerPacket r -> PacketReceiver ClientPacket r -> Sem r a )
-  -> Sem r a
-serverProtocolRunner = protocolRunner
+type family Produces p where
+  Produces Server = ServerPacket
+  Produces Client = ClientPacket
 
-clientProtocolRunner
-  :: forall a r
-   . Members '[Trace, ByteBufferAction, Async, SocketAction] r
-  => ( PacketSender ClientPacket r -> PacketReceiver ServerPacket r -> Sem r a )
-  -> Sem r a
-clientProtocolRunner = protocolRunner
+type family Consumes p where
+  Consumes Server = ClientPacket
+  Consumes Client = ServerPacket
 
-protocolRunner
-  :: forall i o a r
-   . Members '[Trace, ByteBufferAction, Async, SocketAction] r
-  => ( PacketSender o r -> PacketReceiver i r -> Sem r a )
-  -> Sem r a
-protocolRunner handler = do
-  async $ receiveLoop
-  result <- handler sendPacket receivePacket
+data Minecraft (side :: Side) (m :: * -> *) a where
+  MaybeReceivePacket ::
+    (packet ~ Consumes side state, Store packet, Show packet)
+    => Minecraft side m (Maybe packet)
+  ReceivePacket ::
+    (packet ~ Consumes side state, Store packet, Show packet)
+    => Minecraft side m (Consumes side state)
+  SendPacket ::
+    (packet ~ Produces side state, Store packet, Show packet)
+    => packet -> Minecraft side m ()
+
+
+-- The same as with
+--   makeSem ''Minecraft
+-- But with the state argument moved to the front for more convenience
+type instance Polysemy.Internal.CustomErrors.DefiningModule Minecraft = "Minecraft.Packet"
+maybeReceivePacket ::
+  forall state side r packet.
+  (MemberWithError (Minecraft side) r,
+    (~) packet (Consumes side state),
+    Store packet,
+    Show packet) =>
+  Sem r (Maybe packet)
+{-# INLINABLE maybeReceivePacket #-}
+maybeReceivePacket
+  = Polysemy.Internal.send
+      (MaybeReceivePacket ::
+          Minecraft side (Sem r) (Maybe packet))
+receivePacket ::
+  forall state side r packet.
+  (MemberWithError (Minecraft side) r,
+    (~) packet (Consumes side state),
+    Store packet,
+    Show packet) =>
+  Sem r (Consumes side state)
+{-# INLINABLE receivePacket #-}
+receivePacket
+  = Polysemy.Internal.send
+      (ReceivePacket ::
+          Minecraft side (Sem r) (Consumes side state))
+sendPacket ::
+  forall state side r packet.
+  (MemberWithError (Minecraft side) r,
+    (~) packet (Produces side state),
+    Store packet,
+    Show packet) =>
+  packet -> Sem r ()
+{-# INLINABLE sendPacket #-}
+sendPacket x
+  = Polysemy.Internal.send
+      (SendPacket x :: Minecraft side (Sem r) ())
+
+
+runMinecraft :: forall side r a . Members '[Trace, Async, Final IO, Error String] r => Socket -> Sem (Minecraft side ': r) a -> Sem r a
+runMinecraft socket action = runByteBufferAction $ runSocketAction socket $ do
+  async receiveLoop
+  result <- reinterpret2 interpreter action
   socketClose
   return result
+  where
+    interpreter :: forall m x . Minecraft side m x -> Sem (SocketAction ': ByteBufferAction ': r) x
+    interpreter (SendPacket packet) = do
+        trace $ "Sending packet: " <> show packet
+        let payload = encode packet
+            header = encode (MCVarInt (fromIntegral (BS.length payload)))
+        socketSend (header <> payload)
+    interpreter MaybeReceivePacket = maybeReceive >>= \case
+        Nothing -> trace "Client closed connection" >> return Nothing
+        Just packet -> return $ Just packet
+    interpreter ReceivePacket = maybeReceive >>= \case
+        Nothing -> throw "Client closed connection while a packet was expected"
+        Just packet -> return packet
 
 
-sendPacket :: forall h (s :: ServerState) p r . (Members '[Trace, SocketAction] r, p ~ h s, Show p, Store p) => p -> Sem r ()
-sendPacket packet = do
-  trace $ "Sending packet: " <> show packet
-  let payload = encode packet
-      header = encode (MCVarInt (fromIntegral (BS.length payload)))
-  socketSend (header <> payload)
+
+    maybeReceive :: forall r s packet . (Store packet, Show packet, Members '[Trace, ByteBufferAction, SocketAction, Error String] r) => Sem r (Maybe packet)
+    maybeReceive = nextBytes >>= \case
+      Nothing -> return Nothing
+      Just bytes -> case decode bytes of
+        Left exc -> throw $ "Couldn't decode packet: " <> show exc
+        Right packet -> do
+          trace $ "Received packet: " <> show packet
+          return $ Just packet
+
+    nextBytes :: forall r . Member ByteBufferAction r => Sem r (Maybe ByteString)
+    nextBytes = getSize mempty >>= \case
+      Nothing -> return Nothing
+      Just (MCVarInt size) -> byteBufferGet (fromIntegral size)
+      where
+        getSize :: ByteString -> Sem r (Maybe MCVarInt)
+        getSize previous = byteBufferGet 1 >>= \case
+          Nothing -> return Nothing
+          Just onebyte ->
+            let bytes = previous <> onebyte
+            in case decode bytes of
+              Left _ -> getSize bytes
+              Right count -> return (Just count)
 
 receiveLoop :: Members '[ByteBufferAction, SocketAction] r => Sem r ()
 receiveLoop = socketRecv 4096 >>= \case
@@ -132,29 +208,3 @@ receiveLoop = socketRecv 4096 >>= \case
   Just bytes -> do
     byteBufferPut bytes
     receiveLoop
-
-receivePacket :: forall h (s :: ServerState) p a r . (Members '[ByteBufferAction, Trace] r, p ~ h s, Show p, Store p) => (p -> Sem r a) -> Sem r (Maybe a)
-receivePacket handler = nextBytes >>= \case
-  Nothing -> trace "Client closed connection" >> return Nothing
-  Just bytes -> case decode bytes :: Either PeekException p of
-    Left exc -> trace (show exc) >> return Nothing
-    Right packet -> do
-      trace $ "Received packet: " <> show packet
-      result <- handler packet
-      return $ Just result
-
-  where
-
-  nextBytes :: Sem r (Maybe ByteString)
-  nextBytes = getSize mempty >>= \case
-    Nothing -> return Nothing
-    Just (MCVarInt size) -> byteBufferGet (fromIntegral size)
-    where
-      getSize :: ByteString -> Sem r (Maybe MCVarInt)
-      getSize previous = byteBufferGet 1 >>= \case
-        Nothing -> return Nothing
-        Just onebyte ->
-          let bytes = previous <> onebyte
-          in case decode bytes of
-            Left _ -> getSize bytes
-            Right count -> return (Just count)
