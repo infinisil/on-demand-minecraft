@@ -25,6 +25,10 @@ let
         url = "https://github.com/ddfisher/haskell-socket-activation/commit/7e33b1f89e2eb7c4b6fd92fdbd89a65e93c25d3a.patch";
         sha256 = "1ih2y9gwi7ywa21mm497kgkynabd7y0pvwivfrgd9p84rw01haq3";
       })));
+
+      polysemy = self.callHackage "polysemy" "1.3.0.0" {};
+
+      polysemy-plugin = hlib.doJailbreak (hlib.unmarkBroken super.polysemy-plugin);
     });
   });
 

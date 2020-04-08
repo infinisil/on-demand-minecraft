@@ -16,9 +16,12 @@ executable on-demand-minecraft
   hs-source-dirs:      app
   main-is:             Main.hs
   default-language:    Haskell2010
+  ghc-options:         -O2 -flate-specialise -fspecialise-aggressively -fplugin=Polysemy.Plugin
   build-depends:       base >= 4.12 && < 5
                      , on-demand-minecraft
                      , network
+                     , polysemy
+                     , polysemy-plugin
 
 library
   hs-source-dirs:      lib
@@ -26,6 +29,7 @@ library
                        Minecraft.Types
                        Minecraft.Packet
   default-language:    Haskell2010
+  ghc-options:         -O2 -flate-specialise -fspecialise-aggressively -fplugin=Polysemy.Plugin
   build-depends:       base >= 4.12 && < 5
                      , store
                      , bytestring
@@ -33,6 +37,8 @@ library
                      , aeson
                      , stm
                      , network
+                     , polysemy
+                     , polysemy-plugin
 
 
 test-suite on-demand-minecraft-tests
