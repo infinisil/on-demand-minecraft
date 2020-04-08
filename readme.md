@@ -14,5 +14,7 @@ Previous work is in https://github.com/Infinisil/system/tree/2e3e3bfe3dd6904d91e
 Implementation steps:
 - [x] Get a simple Haskell-based socket service working, so that one can ping it with e.g. `nc` and it responds with a pong. https://hackage.haskell.org/package/socket-activation can be used for this
 - [ ] Implement part of the minecraft server protocol such that status and login messages can be understood and replied to
+  - [x] Status messages
+	- [ ] Login messages
 - [ ] Implement the server starting part with the digital ocean API: https://hackage.haskell.org/package/DOH
 - [ ] To determine whether the actual server is running, send a status message to it
