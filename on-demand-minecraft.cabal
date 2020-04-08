@@ -22,6 +22,9 @@ executable on-demand-minecraft
                      , network
                      , polysemy
                      , polysemy-plugin
+                     , async
+                     , bytestring
+                     , stm
 
 library
   hs-source-dirs:      lib
