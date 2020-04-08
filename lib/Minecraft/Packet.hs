@@ -1,3 +1,5 @@
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -17,24 +19,47 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import Data.Store
 
+
+type PacketSender h = forall (s :: ServerState) p . (p ~ h s, Show p, Store p) => p -> IO ()
+type PacketReceiver h = forall (s :: ServerState) p a . (p ~ h s, Show p, Store p) => (p -> IO a) -> IO (Maybe a)
+
+serverProtocolRunner
+  :: Socket
+  -> ( PacketSender ServerPacket -> PacketReceiver ClientPacket -> IO a )
+  -> IO a
+serverProtocolRunner = protocolRunner
+
+clientProtocolRunner
+  :: Socket
+  -> ( PacketSender ClientPacket -> PacketReceiver ServerPacket -> IO a )
+  -> IO a
+clientProtocolRunner = protocolRunner
+
+protocolRunner
+  :: forall i o a . Socket
+  -> ( PacketSender o -> PacketReceiver i -> IO a )
+  -> IO a
+protocolRunner socket handler = with Nothing $ \buf -> do
+  bufferEnv <- BufferEnv buf <$> newTVarIO 0 <*> newTVarIO False
+  forkIO $ receiveLoop socket bufferEnv
+  result <- handler (sendPacket socket) (receivePacket bufferEnv)
+  close socket
+  return result
+
+
+sendPacket :: forall h (s :: ServerState) p . (p ~ h s, Show p, Store p) => Socket -> p -> IO ()
+sendPacket socket packet = do
+  putStrLn $ "Sending packet: " <> show packet
+  let payload = encode packet
+      header = encode (MCVarInt (fromIntegral (BS.length payload)))
+  sendAll socket (header <> payload)
+
 data BufferEnv = BufferEnv
   { byteBuffer :: ByteBuffer
   , byteCount :: TVar Int
   , isDone :: TVar Bool
   }
 
-type ServerPacketSender = forall s p . (p ~ ServerPacket s, Show p, Store p) => p -> IO ()
-type ServerPacketReceiver = forall s p . (p ~ ClientPacket s, Show p, Store p) => (p -> IO ()) -> IO ()
-
-serverProtocolRunner
-  :: Socket
-  -> ( ServerPacketSender -> ServerPacketReceiver -> IO () )
-  -> IO ()
-serverProtocolRunner socket handler = with Nothing $ \buf -> do
-  bufferEnv <- BufferEnv buf <$> newTVarIO 0 <*> newTVarIO False
-  forkIO $ receiveLoop socket bufferEnv
-  handler (sendPacket socket) (receivePacket bufferEnv)
-  close socket
 
 receiveLoop :: Socket -> BufferEnv -> IO ()
 receiveLoop socket bufferEnv@BufferEnv { .. } = do
@@ -46,12 +71,6 @@ receiveLoop socket bufferEnv@BufferEnv { .. } = do
     atomically $ modifyTVar' byteCount (+ BS.length bytes)
     receiveLoop socket bufferEnv
 
-sendPacket :: (p ~ ServerPacket s, Show p, Store p) => Socket -> p -> IO ()
-sendPacket socket packet = do
-  putStrLn $ "Sending packet: " <> show packet
-  let payload = encode packet
-      header = encode (MCVarInt (fromIntegral (BS.length payload)))
-  sendAll socket (header <> payload)
 
 consumeExactly :: BufferEnv -> Int -> IO (Maybe ByteString)
 consumeExactly BufferEnv { .. } count = do
@@ -77,14 +96,15 @@ consumeExactly BufferEnv { .. } count = do
     return $ Just bytes
   else return Nothing
 
-receivePacket :: forall s p . (p ~ ClientPacket s, Show p, Store p) => BufferEnv -> (p -> IO ()) -> IO ()
+receivePacket :: forall h (s :: ServerState) p a . (p ~ h s, Show p, Store p) => BufferEnv -> (p -> IO a) -> IO (Maybe a)
 receivePacket bufferEnv handler = nextBytes >>= \case
-  Nothing -> putStrLn "Client closed connection"
+  Nothing -> putStrLn "Client closed connection" >> return Nothing
   Just bytes -> case decode bytes :: Either PeekException p of
-    Left exc -> print exc
+    Left exc -> print exc >> return Nothing
     Right packet -> do
       putStrLn $ "Received packet: " <> show packet
-      handler packet
+      result <- handler packet
+      return $ Just result
 
   where
 

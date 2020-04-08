@@ -189,7 +189,6 @@ instance A.FromJSON ResponseVersion where
 data ResponsePlayers = ResponsePlayers
   { response_players_max :: Int
   , response_players_online :: Int
-  , response_players_sample :: [()]
   } deriving (Generic, Show)
 
 instance A.ToJSON ResponsePlayers where

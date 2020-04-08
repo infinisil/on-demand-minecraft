@@ -18,34 +18,34 @@ import Control.Monad
 statusPacket :: ServerPacket StatusState
 statusPacket = ServerPacketResponse $ Response
   { response_version = ResponseVersion "1.15.2" 578
-  , response_players = ResponsePlayers 20 0 []
+  , response_players = ResponsePlayers 20 0
   , response_description = Chat "Server isn't running"
   }
 
-server :: ServerPacketSender -> ServerPacketReceiver -> IO ()
-server send recv = recv @HandshakingState $ \case
+server :: PacketSender ServerPacket -> PacketReceiver ClientPacket -> IO ()
+server send recv = void $ recv @HandshakingState $ \case
   ClientPacketHandshake handshake -> case nextState handshake of
     StatusState -> clientLoopStatus
     LoginState -> clientLoopLogin
   where
     clientLoopStatus :: IO ()
-    clientLoopStatus = recv @StatusState $ \case
+    clientLoopStatus = void $ recv @StatusState $ \case
       ClientPacketRequest -> do
-        send statusPacket
+        Just response <- queryServerStatus "infinisil.com"
+        send (ServerPacketResponse response)
         clientLoopStatus
       ClientPacketPing nonce -> do
         send $ ServerPacketPong nonce
         clientLoopStatus
 
     clientLoopLogin :: IO ()
-    clientLoopLogin = recv @LoginState $ \case
+    clientLoopLogin = void $ recv @LoginState $ \case
       ClientPacketLoginStart name -> do
         send $ ServerPacketLoginSuccess name "01e2780a-1334-4891-95dd-506e58dcebb9"
         send $ ServerPacketDisconnect "starting"
 
-main :: IO ()
-main = do
-  hSetBuffering stdout LineBuffering
+runServer :: IO ()
+runServer = do
   serverSocket <- socket AF_INET Stream defaultProtocol
   let hints = defaultHints
         { addrFlags = [AI_PASSIVE]
@@ -59,3 +59,29 @@ main = do
     (socket, addr) <- accept serverSocket
     putStrLn $ "Accepted connection from " <> show addr
     forkIO $ serverProtocolRunner socket server
+
+queryServerStatus :: HostName -> IO (Maybe Response)
+queryServerStatus hostname = do
+  let hints = defaultHints { addrSocketType = Stream }
+  addr <- head <$> getAddrInfo (Just hints) (Just hostname) (Just "25565")
+  putStrLn $ "Address is " <> show addr
+  clientSocket <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
+  connect clientSocket $ addrAddress addr
+  clientProtocolRunner clientSocket client
+
+client :: PacketSender ClientPacket -> PacketReceiver ServerPacket -> IO (Maybe Response)
+client send recv = do
+  send $ ClientPacketHandshake $ Handshake
+    { protocolVersion = 578
+    , serverAddress = ""
+    , serverPort = 0
+    , nextState = StatusState
+    }
+  send ClientPacketRequest
+  recv @StatusState $ \case
+    ServerPacketResponse response -> return response
+
+main :: IO ()
+main = do
+  hSetBuffering stdout LineBuffering
+  runServer
