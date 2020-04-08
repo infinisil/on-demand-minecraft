@@ -8,7 +8,6 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module Main where
 
-import Socket
 import Network.Socket
 import Network.Socket.ByteString
 import System.IO
@@ -141,4 +140,16 @@ receiveLoop socket bufferEnv@BufferEnv { .. } = do
 main :: IO ()
 main = do
   hSetBuffering stdout LineBuffering
-  socketRunner server
+  serverSocket <- socket AF_INET Stream defaultProtocol
+  let hints = defaultHints
+        { addrFlags = [AI_PASSIVE]
+        , addrSocketType = Stream
+        }
+  -- TODO: Listen on all addresses to support both IPv4 and IPv6?
+  addr <- head <$> getAddrInfo (Just hints) Nothing (Just "25565")
+  bind serverSocket $ addrAddress addr
+  listen serverSocket 16
+  forever $ do
+    (socket, addr) <- accept serverSocket
+    putStrLn $ "Accepted connection from " <> show addr
+    forkIO $ server socket

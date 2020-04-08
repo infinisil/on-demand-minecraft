@@ -33,7 +33,6 @@ import Control.Monad (replicateM)
 
 import Control.Applicative
 import Data.Void (absurd)
-import Data.Functor.Contravariant.Divisible
 import qualified Data.Aeson as A
 import qualified Data.ByteString.Lazy as LBS
 
