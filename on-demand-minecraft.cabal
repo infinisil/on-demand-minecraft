@@ -16,7 +16,7 @@ executable on-demand-minecraft
   hs-source-dirs:      app
   main-is:             Main.hs
   default-language:    Haskell2010
-  ghc-options:         -O2 -flate-specialise -fspecialise-aggressively -fplugin=Polysemy.Plugin
+  ghc-options:         -O2 -flate-specialise -fspecialise-aggressively -fplugin=Polysemy.Plugin -threaded
   build-depends:       base >= 4.12 && < 5
                      , on-demand-minecraft
                      , network
@@ -25,6 +25,10 @@ executable on-demand-minecraft
                      , async
                      , bytestring
                      , stm
+                     , text
+                     , containers
+                     , directory
+                     , async
 
 library
   hs-source-dirs:      lib
