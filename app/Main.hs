@@ -14,6 +14,7 @@ module Main where
 
 import Minecraft
 import DigitalOcean
+import Timeout
 
 import Network.Socket
 import Network.Socket.ByteString
@@ -35,7 +36,6 @@ import qualified Network.DigitalOcean.Services as DOS
 import qualified Network.DigitalOcean.Types as DOT
 
 import Control.Concurrent.STM
-import Control.Monad (join)
 import qualified System.Timeout
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -62,18 +62,6 @@ dropletPayload = DOS.IDropletPayload
   , DOS.dropletpayloadVolumes = Just ["48084520-7a5f-11ea-aa42-0a58ac14d120"]
   , DOS.dropletpayloadTags = Nothing
   }
-
-data Timeout m a where
-  Timeout :: Int -> m a -> Timeout m (Maybe a)
-
-makeSem ''Timeout
-
-runTimeout :: Member (Final IO) r => Sem (Timeout ': r) a -> Sem r a
-runTimeout = interpretFinal $ \case
-  Timeout micros action -> do
-    ins <- getInspectorS
-    m' <- runS action
-    liftS $ join <$> System.Timeout.timeout micros (inspect ins <$> m')
 
 shallowServer :: forall r . Members '[Embed IO, Reader Whitelist, Reader DOT.Client, AtomicState UpstreamState, Async, Final IO, Trace, Minecraft Server] r => UpstreamState -> Sem r ()
 shallowServer currentState = receivePacket @HandshakingState >>= \case
@@ -275,9 +263,10 @@ isUp ip = do
     runMinecraft upstreamSocket mcClient
   case result of
     Nothing -> do
-      trace "Timed or errored out, upstream is down"
+      trace "Timed out, upstream is down"
       return False
-    Just res -> do
+    Just Nothing -> throw "Got an error during the timeout action?"
+    Just (Just res) -> do
       trace $ "Didn't time out, upstream is up: " <> show res
       return res
   where
