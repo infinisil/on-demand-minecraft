@@ -86,7 +86,9 @@ handlePeer (peerSocket, peerAddr) = do
             Left err -> Text.pack $ show err
             Right _ -> "Server now starting"
   where
-    whitelistPassing :: Member (Reader Whitelist) r => Sem r Text -> Text -> Sem r Text
+    whitelistPassing :: Members '[Trace, Reader Whitelist] r => Sem r Text -> Text -> Sem r Text
     whitelistPassing action nick = do
-      whitelisted <- Map.member nick <$> ask
-      if whitelisted then action else return "You are not whitelisted"
+      whitelisted <- elem nick <$> ask
+      if whitelisted then action else do
+        trace $ "Non-whitelisted player attempted to join: " <> Text.unpack nick
+        return "You are not whitelisted"

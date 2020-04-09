@@ -91,26 +91,27 @@ updateAndGetState = do
         Right droplet ->  do
           let status = dropletStatus droplet
           trace $ "Status reported by DigitalOcean is: " <> show status
-          let ip = fmap networkIpAddress $ find (\net -> networkType net == "public") $ v4 $ dropletNetworks droplet
+          let ip = fmap networkIpAddress $ find (\net -> networkType net == "private") $ v4 $ dropletNetworks droplet
           return (status, ip)
 
-dropletPayload :: IDropletPayload
-dropletPayload = IDropletPayload
+dropletPayload :: Integer -> IDropletPayload
+dropletPayload imageId = IDropletPayload
   { dropletpayloadRegion = "fra1"
   , dropletpayloadSize = "c-2"
-  , dropletpayloadImage = WithImageId 61884377
+  , dropletpayloadImage = WithImageId imageId
   , dropletpayloadSshKeys = Just ["25879389"]
   , dropletpayloadBackups = Nothing
   , dropletpayloadIpv6 = Nothing
   , dropletpayloadPrivateNetworking = Just True
   , dropletpayloadUserData = Nothing
   , dropletpayloadMonitoring = Nothing
-  , dropletpayloadVolumes = Just ["48084520-7a5f-11ea-aa42-0a58ac14d120"]
+  , dropletpayloadVolumes = Just ["8b787688-52d2-11ea-9e33-0a58ac14d123"]
   , dropletpayloadTags = Nothing
   }
 
-startUpstream :: Members '[DigitalOcean, Trace, AtomicState UpstreamState] r => Sem r ()
+startUpstream :: Members '[Embed IO, DigitalOcean, Trace, AtomicState UpstreamState] r => Sem r ()
 startUpstream = do
+  imageId <- embed $ read . BS.unpack <$> BS.readFile "active-image"
   trace "STARTING"
-  droplet <- createDroplet "minecraft-test" dropletPayload
+  droplet <- createDroplet "minecraft-test" (dropletPayload imageId)
   atomicPut $ Starting (dropletId droplet)
