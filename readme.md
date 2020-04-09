@@ -17,4 +17,5 @@ Implementation steps:
   - [x] Status messages
   - [x] Login messages
 - [x] Implement dynamically deciding what to do based on whether the actual server is online
-- [ ] Implement the server starting part with the digital ocean API: https://hackage.haskell.org/package/DOH
+- [x] Implement the server starting part with the digital ocean API: https://hackage.haskell.org/package/DOH
+- [ ] Snoop the relayed connection to figure out how many people are online and delete the server again if nobody is online for 5 minutes. Can also be used to log to IRC
