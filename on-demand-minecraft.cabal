@@ -37,8 +37,11 @@ library
                        Minecraft.Types
                        Minecraft.Packet
                        Minecraft.Effect
+                       Minecraft.Protocol
                        DigitalOcean
                        Config
+                       State
+                       Connection
   default-language:    Haskell2010
   ghc-options:         -O2 -flate-specialise -fspecialise-aggressively -fplugin=Polysemy.Plugin
   build-depends:       base >= 4.12 && < 5
@@ -53,6 +56,8 @@ library
                      , DOH
                      , mtl
                      , containers
+                     , directory
+                     , async
 
 
 test-suite on-demand-minecraft-tests

@@ -1,17 +1,20 @@
-{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE DataKinds           #-}
 {-# LANGUAGE FlexibleContexts    #-}
 {-# LANGUAGE GADTs               #-}
 {-# LANGUAGE LambdaCase          #-}
+{-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications    #-}
 {-# LANGUAGE TypeFamilies        #-}
+{-# LANGUAGE TypeOperators       #-}
 module Minecraft.Effect where
 
 import Minecraft.Types
 import Minecraft.Packet
 
-import Network.Socket (Socket)
+import Network.Socket
 import Data.Store
+import Control.Exception (IOException)
 
 import Polysemy
 import Polysemy.Async
@@ -19,6 +22,7 @@ import Polysemy.Trace
 import Polysemy.Error
 import qualified Polysemy.Internal
 import qualified Polysemy.Internal.CustomErrors
+
 
 
 data Side = Server | Client

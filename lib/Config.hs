@@ -1,3 +1,4 @@
+{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DataKinds         #-}
@@ -19,6 +20,8 @@ import System.Environment (getArgs)
 import qualified Data.ByteString.Char8 as BS
 
 type Whitelist = Map Text Text
+
+type MemberConfig r = Members '[Reader Whitelist, Reader Client] r
 
 data Config = Config
   { whitelist :: Whitelist
