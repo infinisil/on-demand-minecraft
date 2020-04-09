@@ -14,11 +14,11 @@ module Main where
 
 import Minecraft
 import DigitalOcean
-import Timeout
+import Config
 
 import Network.Socket
 import Network.Socket.ByteString
-import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as BS
 import System.IO
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Monad
@@ -29,6 +29,8 @@ import Polysemy.Trace
 import Polysemy.Error
 import Polysemy.Resource
 import Polysemy.AtomicState
+import Data.Maybe (fromMaybe)
+import System.Environment
 import Polysemy.Reader
 import           Polysemy.Final
 
@@ -36,7 +38,6 @@ import qualified Network.DigitalOcean.Services as DOS
 import qualified Network.DigitalOcean.Types as DOT
 
 import Control.Concurrent.STM
-import qualified System.Timeout
 import Data.Text (Text)
 import qualified Data.Text as Text
 
@@ -52,7 +53,7 @@ dropletPayload :: DOS.IDropletPayload
 dropletPayload = DOS.IDropletPayload
   { DOS.dropletpayloadRegion = "fra1"
   , DOS.dropletpayloadSize = "c-2"
-  , DOS.dropletpayloadImage = DOS.WithImageId 61880900
+  , DOS.dropletpayloadImage = DOS.WithImageId 61884377
   , DOS.dropletpayloadSshKeys = Just ["25879389"]
   , DOS.dropletpayloadBackups = Nothing
   , DOS.dropletpayloadIpv6 = Nothing
@@ -130,18 +131,6 @@ tcpRelay a b = embed $ do
 
 data UpstreamState = Down | Starting DOT.DropletId | Up (DOT.DropletId, DOT.IpAddress) deriving (Show, Read, Eq)
 
-type Whitelist = Map Text Text
-
-data Config = Config
-  { config_whitelist :: Whitelist
-  , config_upstream :: AddrInfo
-  }
-
-whitelist :: Whitelist
-whitelist = Map.fromList
-  [ ("infinisil", "01e2780a-1334-4891-95dd-506e58dcebb9")
-  ]
-
 getUpstreamAddr :: Members '[Error String, Embed IO] r => DOT.IpAddress -> Sem r AddrInfo
 getUpstreamAddr ip = do
   let hints = defaultHints { addrSocketType = Stream }
@@ -172,40 +161,41 @@ restoreState :: Member (Embed IO) r => Sem r (TVar UpstreamState)
 restoreState = do
   exists <- embed $ doesFileExist statePath
   if exists then do
-    value <- embed $ read <$> readFile statePath
+    value <- embed $ read . BS.unpack <$> BS.readFile statePath
     embed $ newTVarIO value
   else embed $ newTVarIO Down
 
 saveState :: Member (Embed IO) r => TVar UpstreamState -> Sem r ()
 saveState state = do
   value <- embed $ readTVarIO state
-  embed $ writeFile statePath $ show value
+  embed $ BS.writeFile statePath $ BS.pack $ show value
 
 main :: IO ()
-main = do
-  runFinal $ asyncToIOFinal $ resourceToIOFinal $ embedToFinal $ traceToIO $ do
-    embed $ hSetBuffering stdout LineBuffering
-    trace "Starting on-demand-minecraft"
-    bracket restoreState saveState
-      $ \state -> runReader whitelist
-      $ runAtomicStateTVar state
-      $ runReader (DOT.Client "088e8797832b84bb1149cbe7fbc0ca84b535ba348180328e6c661e4c1737fcd8")
-      $ runServer
-    trace "on-demand-minecraft finished"
+main = runFinal
+  $ embedToFinal
+  $ resourceToIOFinal
+  $ bracket restoreState saveState $ \var -> runAtomicStateTVar var
+  $ asyncToIOFinal
+  $ traceToIO
+  $ do
+    result <- errorToIOFinal $ runConfig runServer
+    case result of
+      Left err -> trace err
+      Right result -> return result
 
-runServer :: Members '[Reader DOT.Client, Trace, Async, Embed IO, Final IO, AtomicState UpstreamState, Reader Whitelist] r => Sem r ()
+runServer :: Members '[Error String, Reader DOT.Client, Trace, Async, Embed IO, Final IO, AtomicState UpstreamState, Reader Whitelist] r => Sem r ()
 runServer = do
   serverSocket <- initListenSocket
   trace "Now accepting connections"
   forever $ do
     peer <- embedFinal $ accept serverSocket
     async $ do
-      result <- runError $ fromExceptionSemVia (\(e :: Control.Exception.SomeException) -> show e) $ handlePeer peer
+      result <- try $ handlePeer peer
       case result of
         Left err -> trace $ "Error during peer handling :" <> err
         Right result -> trace "Finished handling peer successfully"
 
-updateAndGetState :: forall r . Members '[Reader DOT.Client, Async, Reader Whitelist, Final IO, Embed IO, Error String, Trace, AtomicState UpstreamState] r => Sem r UpstreamState
+updateAndGetState :: forall r . Members '[Reader DOT.Client, Async, Final IO, Embed IO, Error String, Trace, AtomicState UpstreamState] r => Sem r UpstreamState
 updateAndGetState = do
   trace "Updating upstream state"
   currentState <- atomicGet
@@ -253,22 +243,19 @@ updateAndGetState = do
           return (status, ip)
 
 
-isUp :: Members '[Async, Trace, Final IO, Embed IO, Error String, Reader Whitelist] r => DOT.IpAddress -> Sem r Bool
+isUp :: Members '[Async, Trace, Final IO, Embed IO] r => DOT.IpAddress -> Sem r Bool
 isUp ip = do
   trace $ "Trying to determine whether " <> ip <> " has a running minecraft server"
-  result <- runTimeout $ timeout 1000000 $ do
+  result <- runError $ do
     trace "Connecting to the ip"
     upstreamSocket <- connectUpstream ip
     trace "Running a minecraft client"
     runMinecraft upstreamSocket mcClient
   case result of
-    Nothing -> do
-      trace "Timed out, upstream is down"
+    Left err -> do
+      trace $ "Error while trying to determine whether " <> ip <> " is up: " <> show err
       return False
-    Just Nothing -> throw "Got an error during the timeout action?"
-    Just (Just res) -> do
-      trace $ "Didn't time out, upstream is up: " <> show res
-      return res
+    Right result -> return result
   where
     mcClient :: Members '[Trace, Minecraft Client] r => Sem r Bool
     mcClient = do
@@ -284,7 +271,7 @@ isUp ip = do
           trace $ show response
           return True
 
-handlePeer :: Members '[Error String, Reader DOT.Client, Async, Trace, Embed IO, Final IO, AtomicState UpstreamState, Reader Whitelist] r => (Socket, SockAddr) -> Sem r ()
+handlePeer :: Members '[Reader Whitelist, Error String, Reader DOT.Client, Async, Trace, Embed IO, Final IO, AtomicState UpstreamState] r => (Socket, SockAddr) -> Sem r ()
 handlePeer (peerSocket, peerAddr) = do
   trace $ "Accepted connection from " <> show peerAddr
   state <- updateAndGetState
@@ -296,15 +283,15 @@ handlePeer (peerSocket, peerAddr) = do
       trace "Upstream is not up, handling the connection locally"
       runMinecraft peerSocket (shallowServer state)
 
-connectUpstream :: Members '[Error String, Embed IO, Reader Whitelist] r => DOT.IpAddress -> Sem r Socket
+connectUpstream :: Members '[Error String, Embed IO] r => DOT.IpAddress -> Sem r Socket
 connectUpstream ip = do
   addr <- getUpstreamAddr ip
   upstreamSocket <- embed $ socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
-  fromExceptionVia @Control.Exception.SomeException show $ connect upstreamSocket $ addrAddress addr
+  fromExceptionVia @Control.Exception.IOException show $ connect upstreamSocket $ addrAddress addr
   return upstreamSocket
 
 
-runRelay :: Members '[Error String, Embed IO, Reader Whitelist] r => Socket -> DOT.IpAddress -> Sem r ()
+runRelay :: Members '[Error String, Embed IO] r => Socket -> DOT.IpAddress -> Sem r ()
 runRelay peerSocket ip = do
   upstreamSocket <- connectUpstream ip
   tcpRelay peerSocket upstreamSocket
