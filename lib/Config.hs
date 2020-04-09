@@ -19,7 +19,7 @@ import Data.Text (Text)
 import System.Environment (getArgs)
 import qualified Data.ByteString.Char8 as BS
 
-type Whitelist = [Text]
+type Whitelist = Map Text Text
 
 type MemberConfig r = Members '[Reader Whitelist, Reader Client] r
 

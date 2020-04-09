@@ -11,7 +11,8 @@ import Minecraft.Types
 import Minecraft.Effect
 import Polysemy
 import Polysemy.Trace
-import Data.Text (Text)
+import Polysemy.Reader
+import Data.Text (Text, unpack)
 
 queryStatus :: Members '[Trace, Minecraft Client] r => Sem r Response
 queryStatus = do
@@ -25,11 +26,12 @@ queryStatus = do
   receivePacket @StatusState >>= \case
     ServerPacketResponse response -> return response
 
+type WhitelistCheck r = Text -> Sem r (Maybe Text)
 type StatusResponse = Text
-type LoginResponse r = Text -> Sem r Text
+type LoginResponse r = Sem r Text
 
-shallowServer :: forall r . Members '[Trace, Minecraft Server] r => StatusResponse -> LoginResponse r -> Sem r ()
-shallowServer statusResponse loginResponse = receivePacket @HandshakingState >>= \case
+shallowServer :: forall r . Members '[Trace, Minecraft Server] r => WhitelistCheck r -> StatusResponse -> LoginResponse r -> Sem r ()
+shallowServer whitelistCheck statusResponse loginResponse = receivePacket @HandshakingState >>= \case
   ClientPacketHandshake handshake -> case nextState handshake of
     StatusState -> clientLoopStatus
     LoginState -> clientLoopLogin
@@ -51,6 +53,11 @@ shallowServer statusResponse loginResponse = receivePacket @HandshakingState >>=
 
     clientLoopLogin :: Sem r ()
     clientLoopLogin = receivePacket @LoginState >>= \case
-      ClientPacketLoginStart name -> do
-        message <- loginResponse name
-        sendPacket $ ServerPacketDisconnect message
+      ClientPacketLoginStart name -> whitelistCheck name >>= \case
+        Nothing -> do
+          trace $ "Non-whitelisted player attempted to join: " <> unpack name
+          sendPacket $ ServerPacketDisconnect "You're not whitelisted"
+        Just uuid -> do
+          message <- loginResponse
+          sendPacket $ ServerPacketLoginSuccess name uuid
+          sendPacket $ ServerPacketDisconnect message

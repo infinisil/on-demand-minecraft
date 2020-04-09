@@ -25,6 +25,7 @@ import Polysemy.Reader
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Map as Map
+import System.IO
 
 type MemberApp r = (Members
   '[ Error String
@@ -50,6 +51,7 @@ main = runFinal
 
 runServer :: MemberApp r => Sem r ()
 runServer = do
+  embed $ hSetBuffering stdout LineBuffering
   serverSocket <- initListenSocket
   trace "Now accepting connections"
   forever $ do
@@ -72,23 +74,16 @@ handlePeer (peerSocket, peerAddr) = do
     Starting _ -> do
       trace "Upstream is not up, handling the connection locally"
       runMinecraft peerSocket
-        $ shallowServer "Server starting.."
-        $ whitelistPassing
+        $ shallowServer whitelistPassing "Server starting.."
         $ return "Server is already starting"
     Down -> do
       trace "Upstream is not up, handling the connection locally"
       runMinecraft peerSocket
-        $ shallowServer "Server is down, join to start it"
-        $ whitelistPassing
-        $ do
+        $ shallowServer whitelistPassing "Server is down, join to start it" $ do
           result <- runError $ runDigitalOcean startUpstream
           return $ case result of
             Left err -> Text.pack $ show err
             Right _ -> "Server now starting"
   where
-    whitelistPassing :: Members '[Trace, Reader Whitelist] r => Sem r Text -> Text -> Sem r Text
-    whitelistPassing action nick = do
-      whitelisted <- elem nick <$> ask
-      if whitelisted then action else do
-        trace $ "Non-whitelisted player attempted to join: " <> Text.unpack nick
-        return "You are not whitelisted"
+    whitelistPassing :: Member (Reader Whitelist) r => Text -> Sem r (Maybe Text)
+    whitelistPassing nick = Map.lookup nick <$> ask
