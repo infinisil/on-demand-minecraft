@@ -29,6 +29,7 @@ executable on-demand-minecraft
                      , containers
                      , directory
                      , async
+                     , DOH
 
 library
   hs-source-dirs:      lib
@@ -36,6 +37,7 @@ library
                        Minecraft.Types
                        Minecraft.Packet
                        Minecraft.Effect
+                       DigitalOcean
   default-language:    Haskell2010
   ghc-options:         -O2 -flate-specialise -fspecialise-aggressively -fplugin=Polysemy.Plugin
   build-depends:       base >= 4.12 && < 5
@@ -47,6 +49,8 @@ library
                      , network
                      , polysemy
                      , polysemy-plugin
+                     , DOH
+                     , mtl
 
 
 test-suite on-demand-minecraft-tests
