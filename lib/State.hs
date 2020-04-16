@@ -97,7 +97,7 @@ updateAndGetState = do
 dropletPayload :: Integer -> IDropletPayload
 dropletPayload imageId = IDropletPayload
   { dropletpayloadRegion = "fra1"
-  , dropletpayloadSize = "c-2"
+  , dropletpayloadSize = "s-2vcpu-4gb"
   , dropletpayloadImage = WithImageId imageId
   , dropletpayloadSshKeys = Just ["25879389"]
   , dropletpayloadBackups = Nothing
@@ -113,5 +113,5 @@ startUpstream :: Members '[Embed IO, DigitalOcean, Trace, AtomicState UpstreamSt
 startUpstream = do
   imageId <- embed $ read . BS.unpack <$> BS.readFile "active-image"
   trace "STARTING"
-  droplet <- createDroplet "minecraft-test" (dropletPayload imageId)
+  droplet <- createDroplet "minecraft" (dropletPayload imageId)
   atomicPut $ Starting (dropletId droplet)
