@@ -28,14 +28,15 @@ import qualified Data.Map as Map
 import System.IO
 import Data.Time
 
-type MemberApp r = (Members
+type MemberApp r = Members
   '[ Error String
    , Trace
    , Async
    , Embed IO
    , Final IO
    , AtomicState UpstreamState
-   ] r, MemberConfig r)
+   , Reader Config
+   ] r
 
 main :: IO ()
 main = runFinal
@@ -93,5 +94,5 @@ handlePeer (peerSocket, peerAddr) = do
             Left err -> Text.pack $ show err
             Right _ -> "Server now starting"
   where
-    whitelistPassing :: Member (Reader Whitelist) r => Text -> Sem r (Maybe Text)
-    whitelistPassing nick = Map.lookup nick <$> ask
+    whitelistPassing :: Member (Reader Config) r => Text -> Sem r (Maybe Text)
+    whitelistPassing nick = Map.lookup nick <$> asks whitelist

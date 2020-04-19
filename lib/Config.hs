@@ -1,5 +1,4 @@
 {-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DataKinds         #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -13,33 +12,37 @@ import Polysemy.Error
 import GHC.Generics
 import Data.Aeson
 
-import Network.DigitalOcean.Types (Client(..))
 import Data.Map (Map)
 import Data.Text (Text)
 import System.Environment (getArgs)
-import qualified Data.ByteString.Char8 as BS
 
 type Whitelist = Map Text Text
 
-type MemberConfig r = Members '[Reader Whitelist, Reader Client] r
+data DigitalOceanConfig = DigitalOceanConfig
+  { token :: String
+  , region :: String
+  , size :: String
+  , sshKey :: String
+  , volume :: String
+  } deriving (Show, Generic)
 
 data Config = Config
   { whitelist :: Whitelist
-  , digitalOceanToken :: String
+  , digitalOcean :: DigitalOceanConfig
   } deriving (Show, Generic)
 
+instance FromJSON DigitalOceanConfig
 instance FromJSON Config
 
-runConfig :: Members '[Error String, Trace, Embed IO] r => Sem (Reader Whitelist ': Reader Client ': r) a -> Sem r a
+runConfig :: Members '[Error String, Trace, Embed IO] r => Sem (Reader Config ': r) a -> Sem r a
 runConfig action = do
   args <- embed getArgs
   case args of
     [configFile] -> do
       decoded <- embed $ eitherDecodeFileStrict' configFile
       case decoded of
-        Right Config { .. } -> do
+        Right config -> do
           trace $ "Successfully read config file at " <> configFile
-          let client = Client (BS.pack digitalOceanToken)
-          runReader client $ runReader whitelist action
+          runReader config action
         Left err -> throw $ "Error while trying to read the config: " <> err
     _ -> throw "Expecting a single argument for the config file"

@@ -9,6 +9,7 @@ module State where
 
 import Connection
 import DigitalOcean
+import Config
 
 import Polysemy
 import Polysemy.Async
@@ -50,7 +51,7 @@ runUpstreamState :: Members '[Resource, Embed IO] r => Sem (AtomicState Upstream
 runUpstreamState action = bracket restoreState saveState $ \var -> runAtomicStateTVar var action
 
 
-updateAndGetState :: forall r . Members '[Reader Client, Async, Final IO, Embed IO, Error String, Trace, AtomicState UpstreamState] r => Sem r UpstreamState
+updateAndGetState :: forall r . Members '[Reader Config, Async, Final IO, Embed IO, Error String, Trace, AtomicState UpstreamState] r => Sem r UpstreamState
 updateAndGetState = do
   trace "Updating upstream state"
   currentState <- atomicGet
@@ -97,25 +98,28 @@ updateAndGetState = do
           let ip = fmap networkIpAddress $ find (\net -> networkType net == "private") $ v4 $ dropletNetworks droplet
           return (status, ip)
 
-dropletPayload :: Integer -> IDropletPayload
-dropletPayload imageId = IDropletPayload
-  { dropletpayloadRegion = "fra1"
-  , dropletpayloadSize = "s-2vcpu-4gb"
-  , dropletpayloadImage = WithImageId imageId
-  , dropletpayloadSshKeys = Just ["25879389"]
-  , dropletpayloadBackups = Nothing
-  , dropletpayloadIpv6 = Nothing
-  , dropletpayloadPrivateNetworking = Just True
-  , dropletpayloadUserData = Nothing
-  , dropletpayloadMonitoring = Nothing
-  , dropletpayloadVolumes = Just ["8b787688-52d2-11ea-9e33-0a58ac14d123"]
-  , dropletpayloadTags = Nothing
-  }
+dropletPayload :: Member (Reader Config) r => Integer -> Sem r IDropletPayload
+dropletPayload imageId = do
+  doConfig <- asks digitalOcean
+  return $ IDropletPayload
+    { dropletpayloadRegion = region doConfig
+    , dropletpayloadSize = size doConfig
+    , dropletpayloadImage = WithImageId imageId
+    , dropletpayloadSshKeys = Just [sshKey doConfig]
+    , dropletpayloadBackups = Nothing
+    , dropletpayloadIpv6 = Nothing
+    , dropletpayloadPrivateNetworking = Just True
+    , dropletpayloadUserData = Nothing
+    , dropletpayloadMonitoring = Nothing
+    , dropletpayloadVolumes = Just [volume doConfig]
+    , dropletpayloadTags = Nothing
+    }
 
-startUpstream :: Members '[Embed IO, DigitalOcean, Trace, AtomicState UpstreamState] r => Sem r ()
+startUpstream :: Members '[Embed IO, Reader Config, DigitalOcean, Trace, AtomicState UpstreamState] r => Sem r ()
 startUpstream = do
   imageId <- embed $ read . BS.unpack <$> BS.readFile "active-image"
   trace "STARTING"
-  droplet <- createDroplet "minecraft" (dropletPayload imageId)
+  payload <- dropletPayload imageId
+  droplet <- createDroplet "minecraft" payload
   now <- embed getCurrentTime
   atomicPut $ Starting (dropletId droplet) now

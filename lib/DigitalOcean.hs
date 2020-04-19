@@ -8,9 +8,12 @@
 {-# LANGUAGE TemplateHaskell #-}
 module DigitalOcean where
 
+import Config
+
 import Network.DigitalOcean
 import Network.DigitalOcean.Types
 import Network.DigitalOcean.Services
+import qualified Data.ByteString.Char8 as BS
 
 import Polysemy
 import Polysemy.Error
@@ -27,7 +30,7 @@ data DigitalOcean (m :: * -> *) a where
 makeSem ''DigitalOcean
 
 
-runDigitalOcean :: forall r a . Members '[Embed IO, Error DoErr, Reader Client] r => Sem (DigitalOcean ': r) a -> Sem r a
+runDigitalOcean :: forall r a . Members '[Embed IO, Error DoErr, Reader Config] r => Sem (DigitalOcean ': r) a -> Sem r a
 runDigitalOcean = interpret $ \case
   CreateDroplet name payload -> doToSem $ Network.DigitalOcean.createDroplet name payload
   GetDroplet dropletId -> doToSem $ Network.DigitalOcean.getDroplet dropletId
@@ -35,5 +38,5 @@ runDigitalOcean = interpret $ \case
   where
   doToSem :: DO x -> Sem r x
   doToSem doAction = do
-    config <- ask
-    fromEitherM $ MTLExcept.runExceptT $ MTLReader.runReaderT (runDO doAction) config
+    token' <- asks (token . digitalOcean)
+    fromEitherM $ MTLExcept.runExceptT $ MTLReader.runReaderT (runDO doAction) (Client (BS.pack token'))
