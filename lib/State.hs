@@ -22,10 +22,13 @@ import Network.DigitalOcean.Types
 import Network.DigitalOcean.Services
 import System.Directory
 import Data.List (find)
+import Data.Time
 
 import qualified Data.ByteString.Char8 as BS
 
-data UpstreamState = Down | Starting DropletId | Up (DropletId, IpAddress) deriving (Show, Read, Eq)
+type StillUp = Bool
+
+data UpstreamState = Down | Starting DropletId UTCTime | Up StillUp DropletId IpAddress deriving (Show, Read, Eq)
 
 statePath :: FilePath
 statePath = "upstreamstate"
@@ -55,28 +58,28 @@ updateAndGetState = do
     Down -> do
       trace "Currently down"
       return Down
-    Starting dropletId -> do
+    Starting dropletId since -> do
       trace "Currently starting, checking how that's going"
       doStatus <- getDOStatus dropletId
       case doStatus of
-        (New, _) -> return $ Starting dropletId
+        (New, _) -> return $ Starting dropletId since
         (Active, Just ip) -> do
           up <- isServerRunning ip
           return $ if up then
-            Up (dropletId, ip)
+            Up True dropletId ip
           else
-            Starting dropletId
+            Starting dropletId since
         (_, _) -> return Down
-    Up (dropletId, ip) -> do
+    Up still dropletId ip -> do
       trace "Currently up, checking whether it's still up"
       up <- isServerRunning ip
       if up then
-        return $ Up (dropletId, ip)
+        return $ Up True dropletId ip
       else do
         (status, _) <- getDOStatus dropletId
         return $ case status of
-          New -> Starting dropletId
-          Active -> Starting dropletId
+          New -> Up False dropletId ip
+          Active -> Up False dropletId ip
           _ -> Down
   atomicPut newState
   return newState
@@ -114,4 +117,5 @@ startUpstream = do
   imageId <- embed $ read . BS.unpack <$> BS.readFile "active-image"
   trace "STARTING"
   droplet <- createDroplet "minecraft" (dropletPayload imageId)
-  atomicPut $ Starting (dropletId droplet)
+  now <- embed getCurrentTime
+  atomicPut $ Starting (dropletId droplet) now

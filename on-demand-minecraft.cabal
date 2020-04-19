@@ -30,6 +30,7 @@ executable on-demand-minecraft
                      , directory
                      , async
                      , DOH
+                     , time
 
 library
   hs-source-dirs:      lib
@@ -58,6 +59,7 @@ library
                      , containers
                      , directory
                      , async
+                     , time
 
 
 test-suite on-demand-minecraft-tests

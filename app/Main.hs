@@ -26,6 +26,7 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Map as Map
 import System.IO
+import Data.Time
 
 type MemberApp r = (Members
   '[ Error String
@@ -68,13 +69,20 @@ handlePeer (peerSocket, peerAddr) = do
   trace $ "Accepted connection from " <> show peerAddr
   state <- updateAndGetState
   case state of
-    Up (_, ip) -> do
+    Up True _ ip -> do
       trace "Upstream is up, relaying connection"
       runRelay peerSocket ip
-    Starting _ -> do
-      trace "Upstream is not up, handling the connection locally"
+    Up False _ ip -> do
+      trace "Upstream was up, but not anymore, handling the connection locally"
       runMinecraft peerSocket
-        $ shallowServer whitelistPassing "Server starting.."
+        $ shallowServer whitelistPassing "Server temporarily down, probably maintenance happening"
+        $ return "Server not up anymore"
+    Starting _ since -> do
+      trace "Upstream is not up, handling the connection locally"
+      now <- embed getCurrentTime
+      let duration = formatTime defaultTimeLocale "%ss" $ now `diffUTCTime` since
+      runMinecraft peerSocket
+        $ shallowServer whitelistPassing ("Server starting (" <> Text.pack duration <> ")..")
         $ return "Server is already starting"
     Down -> do
       trace "Upstream is not up, handling the connection locally"
