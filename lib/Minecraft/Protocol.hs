@@ -17,7 +17,7 @@ import Data.Text (Text, unpack)
 queryStatus :: Members '[Trace, Minecraft Client] r => Sem r Response
 queryStatus = do
   sendPacket $ ClientPacketHandshake $ Handshake
-    { protocolVersion = 578
+    { protocolVersion = 736
     , serverAddress = ""
     , serverPort = 25565
     , nextState = StatusState
@@ -42,7 +42,7 @@ shallowServer whitelistCheck statusResponse loginResponse = receivePacket @Hands
       Nothing -> trace "Client disconnected"
       Just ClientPacketRequest -> do
         sendPacket $ ServerPacketResponse $ Response
-          { response_version = ResponseVersion "1.15.2" 578
+          { response_version = ResponseVersion "1.16.1" 736
           , response_players = ResponsePlayers (-1) 0
           , response_description = Chat statusResponse
           }
@@ -59,5 +59,4 @@ shallowServer whitelistCheck statusResponse loginResponse = receivePacket @Hands
           sendPacket $ ServerPacketDisconnect "You're not whitelisted"
         Just uuid -> do
           message <- loginResponse
-          sendPacket $ ServerPacketLoginSuccess name uuid
           sendPacket $ ServerPacketDisconnect message

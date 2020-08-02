@@ -79,7 +79,7 @@ instance Store Handshake where
     let nextState = toEnum (fromIntegral nextStateInt)
     return Handshake { .. }
 
-data ServerState = HandshakingState | StatusState | LoginState | PlayState deriving (Show, Eq, Enum)
+data ServerState = HandshakingState | StatusState | LoginState deriving (Show, Eq, Enum)
 
 data ClientPacket (s :: ServerState) where
   ClientPacketHandshake :: Handshake -> ClientPacket HandshakingState
@@ -121,8 +121,7 @@ instance Store (ClientPacket LoginState) where
 data ServerPacket (s :: ServerState) where
   ServerPacketResponse :: Response -> ServerPacket StatusState
   ServerPacketPong :: Int64 -> ServerPacket StatusState
-  ServerPacketLoginSuccess :: Text -> Text -> ServerPacket LoginState
-  ServerPacketDisconnect :: Text -> ServerPacket PlayState
+  ServerPacketDisconnect :: Text -> ServerPacket LoginState
 
 deriving instance Show (ServerPacket s)
 
@@ -142,24 +141,12 @@ instance Store (ServerPacket StatusState) where
 instance Store (ServerPacket LoginState) where
   size = VarSize f where
     f :: ServerPacket LoginState -> Int
-    f (ServerPacketLoginSuccess name uuid) = getSize (MCVarInt 2) + getSize (MCString uuid) + getSize (MCString name)
-  poke (ServerPacketLoginSuccess name uuid) = poke (MCVarInt 2) >> poke (MCString uuid) >> poke (MCString name)
-  peek = peek >>= \case
-    MCVarInt 2 -> do
-      MCString uuid <- peek
-      MCString name <- peek
-      pure $ ServerPacketLoginSuccess name uuid
-
-instance Store (ServerPacket PlayState) where
-  size = VarSize f where
-    f :: ServerPacket PlayState -> Int
-    f (ServerPacketDisconnect reason) = getSize (MCVarInt 0x1B) + getSize (jsonToMCString chat) where
+    f (ServerPacketDisconnect reason) = getSize (MCVarInt 0) + getSize (jsonToMCString chat) where
       chat = Chat { chat_text = reason }
-
-  poke (ServerPacketDisconnect reason) = poke (MCVarInt 0x1B) >> poke (jsonToMCString chat) where
+  poke (ServerPacketDisconnect reason) = poke (MCVarInt 0) >> poke (jsonToMCString chat) where
     chat = Chat { chat_text = reason }
   peek = peek >>= \case
-    MCVarInt 0x1B -> do
+    MCVarInt 0 -> do
       Just Chat { chat_text = reason } <- mcStringToJson <$> peek
       pure $ ServerPacketDisconnect reason
 
