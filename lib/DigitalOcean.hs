@@ -38,5 +38,5 @@ runDigitalOcean = interpret $ \case
   where
   doToSem :: DO x -> Sem r x
   doToSem doAction = do
-    token' <- asks (token . digitalOcean)
-    fromEitherM $ MTLExcept.runExceptT $ MTLReader.runReaderT (runDO doAction) (Client (BS.pack token'))
+    token <- asks (tokenFile . digitalOcean) >>= embed . readFile
+    fromEitherM $ MTLExcept.runExceptT $ MTLReader.runReaderT (runDO doAction) (Client (BS.pack token))

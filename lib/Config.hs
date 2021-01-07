@@ -19,7 +19,8 @@ import System.Environment (getArgs)
 type Whitelist = Map Text Text
 
 data DigitalOceanConfig = DigitalOceanConfig
-  { token :: String
+  { tokenFile :: FilePath
+  , imageFile :: FilePath
   , region :: String
   , size :: String
   , sshKey :: String

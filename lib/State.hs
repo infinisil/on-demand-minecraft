@@ -117,7 +117,7 @@ dropletPayload imageId = do
 
 startUpstream :: Members '[Embed IO, Reader Config, DigitalOcean, Trace, AtomicState UpstreamState] r => Sem r ()
 startUpstream = do
-  imageId <- embed $ read . BS.unpack <$> BS.readFile "active-image"
+  imageId <- read <$> (asks (imageFile . digitalOcean) >>= embed . readFile)
   trace "STARTING"
   payload <- dropletPayload imageId
   droplet <- createDroplet "minecraft" payload
