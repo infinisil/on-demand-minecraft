@@ -30,6 +30,7 @@ data DigitalOceanConfig = DigitalOceanConfig
 data Config = Config
   { whitelist :: Whitelist
   , digitalOcean :: DigitalOceanConfig
+  , port :: Maybe Int
   } deriving (Show, Generic)
 
 instance FromJSON DigitalOceanConfig

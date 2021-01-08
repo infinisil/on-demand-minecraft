@@ -8,6 +8,9 @@
 
 module Connection where
 
+import Config
+
+import Data.Maybe (fromMaybe)
 import Minecraft.Types
 import Minecraft.Protocol
 import Minecraft.Effect
@@ -15,6 +18,7 @@ import Polysemy
 import Polysemy.Error
 import Polysemy.Async
 import Polysemy.Trace
+import Polysemy.Reader
 import Network.Socket
 import Network.Socket.ByteString
 import Control.Monad
@@ -38,19 +42,21 @@ connectUpstream ip = do
   return upstreamSocket
 
 
-initListenSocket :: Member (Embed IO) r => Sem r Socket
-initListenSocket = embed $ do
-  let hints = defaultHints
-        { addrFlags = [AI_PASSIVE]
-        , addrSocketType = Stream
-        }
-  -- TODO: Listen on all addresses to support both IPv4 and IPv6?
-  addr <- addrAddress . head <$> getAddrInfo (Just hints) Nothing (Just "25565")
+initListenSocket :: Members [Reader Config, Embed IO] r => Sem r Socket
+initListenSocket = do
+  port' <- asks (fromMaybe 25565 . port)
+  embed $ do
+    let hints = defaultHints
+          { addrFlags = [AI_PASSIVE]
+          , addrSocketType = Stream
+          }
+    -- TODO: Listen on all addresses to support both IPv4 and IPv6?
+    addr <- addrAddress . head <$> getAddrInfo (Just hints) Nothing (Just (show port'))
 
-  serverSocket <- socket AF_INET Stream defaultProtocol
-  bind serverSocket addr
-  listen serverSocket 16
-  return serverSocket
+    serverSocket <- socket AF_INET Stream defaultProtocol
+    bind serverSocket addr
+    listen serverSocket 16
+    return serverSocket
 
 isServerRunning :: Members '[Error String, Async, Trace, Final IO, Embed IO] r => String -> Sem r Bool
 isServerRunning ip = do
