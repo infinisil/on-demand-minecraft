@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE DataKinds           #-}
 {-# LANGUAGE OverloadedStrings   #-}
+{-# LANGUAGE TypeApplications   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies        #-}
 
@@ -12,6 +13,7 @@ import DigitalOcean
 import Config
 import State
 import Connection
+import Network.DigitalOcean.Types (DoErr)
 
 import Network.Socket (Socket, SockAddr, accept)
 import Control.Monad (forever)
@@ -89,7 +91,7 @@ handlePeer (peerSocket, peerAddr) = do
       trace "Upstream is not up, handling the connection locally"
       runMinecraft peerSocket
         $ shallowServer whitelistPassing "Server is down, join to start it" $ do
-          result <- runError $ runDigitalOcean startUpstream
+          result <- runError @DoErr $ runDigitalOcean startUpstream
           return $ case result of
             Left err -> Text.pack $ show err
             Right _ -> "Server now starting"

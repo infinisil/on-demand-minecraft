@@ -11,6 +11,7 @@ import Connection
 import DigitalOcean
 import Config
 
+import Text.Read
 import Polysemy
 import Polysemy.Async
 import Polysemy.Error
@@ -115,9 +116,10 @@ dropletPayload imageId = do
     , dropletpayloadTags = Nothing
     }
 
-startUpstream :: Members '[Embed IO, Reader Config, DigitalOcean, Trace, AtomicState UpstreamState] r => Sem r ()
+startUpstream :: Members '[Embed IO, Reader Config, Error String, DigitalOcean, Trace, AtomicState UpstreamState] r => Sem r ()
 startUpstream = do
-  imageId <- read <$> (asks (imageFile . digitalOcean) >>= embed . readFile)
+  imageIdStr <- asks (imageFile . digitalOcean) >>= embed . readFile
+  imageId <- note ("Couldn't parse image id from" <> imageIdStr) $ readMaybe imageIdStr
   trace "STARTING"
   payload <- dropletPayload imageId
   droplet <- createDroplet "minecraft" payload

@@ -18,6 +18,9 @@ import qualified Data.ByteString.Char8 as BS
 import Polysemy
 import Polysemy.Error
 import Polysemy.Reader
+import qualified Data.Text.IO as TIO
+import qualified Data.Text as Text
+import Data.Text.Encoding (encodeUtf8)
 
 import qualified Control.Monad.Reader as MTLReader
 import qualified Control.Monad.Except as MTLExcept
@@ -38,5 +41,6 @@ runDigitalOcean = interpret $ \case
   where
   doToSem :: DO x -> Sem r x
   doToSem doAction = do
-    token <- asks (tokenFile . digitalOcean) >>= embed . readFile
-    fromEitherM $ MTLExcept.runExceptT $ MTLReader.runReaderT (runDO doAction) (Client (BS.pack token))
+    token <- asks (tokenFile . digitalOcean) >>= embed . TIO.readFile
+    let client = Client (encodeUtf8 (Text.strip token))
+    fromEitherM $ MTLExcept.runExceptT $ MTLReader.runReaderT (runDO doAction) client
