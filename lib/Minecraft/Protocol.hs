@@ -17,7 +17,7 @@ import Data.Text (Text, unpack)
 queryStatus :: Members '[Trace, Minecraft Client] r => Sem r Response
 queryStatus = do
   sendPacket $ ClientPacketHandshake $ Handshake
-    { protocolVersion = 754
+    { protocolVersion = 755
     , serverAddress = ""
     , serverPort = 25565
     , nextState = StatusState
@@ -42,7 +42,7 @@ shallowServer whitelistCheck statusResponse loginResponse = receivePacket @Hands
       Nothing -> trace "Client disconnected"
       Just ClientPacketRequest -> do
         sendPacket $ ServerPacketResponse $ Response
-          { response_version = ResponseVersion "1.16.5" 754
+          { response_version = ResponseVersion "1.17" 755
           , response_players = ResponsePlayers (-1) 0
           , response_description = Chat statusResponse
           }
